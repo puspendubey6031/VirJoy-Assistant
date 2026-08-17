@@ -1,0 +1,6 @@
+{
+  "name": "VirJoy Assistant",
+  "description": "Native voice assistant for calling contacts with Bengali, Hindi, and English voice commands.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

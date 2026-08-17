@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">VirJoy Assistant</string>
+    <string name="assistant_default_name">VirJoy Assistant</string>
+    <string name="listening_prompt">Listening... Speak now</string>
+    <string name="idle_prompt">Tap the microphone to speak</string>
+    <string name="settings_title">Assistant Settings</string>
+    <string name="voice_gender">Assistant Voice</string>
+    <string name="voice_male">Male</string>
+    <string name="voice_female">Female</string>
+    <string name="permission_required_title">Permissions Required</string>
+    <string name="permission_required_desc">VirJoy Assistant needs Microphone, Contacts, and Call Phone permissions to process voice commands and make calls.</string>
+    <string name="grant_permissions">Grant Permissions</string>
+    <string name="contact_not_found">Contact not found.</string>
+    <string name="multiple_contacts_found">Multiple contacts found. Please choose:</string>
+    <string name="calling_contact">Calling %1$s...</string>
+    <string name="speak_now">Speak now</string>
+</resources>
