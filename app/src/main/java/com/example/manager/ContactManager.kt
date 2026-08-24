@@ -6,6 +6,7 @@ import android.provider.ContactsContract
 import android.util.Log
 import com.example.model.Contact
 import com.example.model.ContactMatchResult
+import com.example.model.PhoneNumberOption
 
 class ContactManager(private val context: Context) {
 
@@ -18,12 +19,14 @@ class ContactManager(private val context: Context) {
      * Reads all real contacts from the device's ContactsContract database.
      */
     fun getAllContacts(): List<Contact> {
-        val contactsMap = mutableMapOf<String, Pair<String, MutableList<String>>>()
+        val contactsMap = mutableMapOf<String, Triple<String, MutableList<String>, MutableList<PhoneNumberOption>>>()
 
         val projection = arrayOf(
             ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
             ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-            ContactsContract.CommonDataKinds.Phone.NUMBER
+            ContactsContract.CommonDataKinds.Phone.NUMBER,
+            ContactsContract.CommonDataKinds.Phone.TYPE,
+            ContactsContract.CommonDataKinds.Phone.LABEL
         )
 
         try {
@@ -39,17 +42,46 @@ class ContactManager(private val context: Context) {
                 val idIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
                 val nameIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
                 val numberIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                val typeIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.TYPE)
+                val labelIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.LABEL)
 
                 while (it.moveToNext()) {
                     val id = if (idIndex >= 0) it.getString(idIndex) ?: "" else ""
                     val name = if (nameIndex >= 0) it.getString(nameIndex) ?: "" else ""
                     val number = if (numberIndex >= 0) it.getString(numberIndex) ?: "" else ""
+                    val phoneType = if (typeIndex >= 0) it.getInt(typeIndex) else ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE
+                    val customLabel = if (labelIndex >= 0) it.getString(labelIndex) else null
 
                     if (id.isNotEmpty() && name.isNotEmpty() && number.isNotEmpty()) {
                         val cleanNumber = number.replace(Regex("[^0-9+]"), "")
-                        val entry = contactsMap.getOrPut(id) { Pair(name, mutableListOf()) }
+                        val entry = contactsMap.getOrPut(id) { Triple(name, mutableListOf(), mutableListOf()) }
                         if (!entry.second.contains(cleanNumber)) {
                             entry.second.add(cleanNumber)
+                            val typeLabel = try {
+                                ContactsContract.CommonDataKinds.Phone.getTypeLabel(
+                                    context.resources,
+                                    phoneType,
+                                    customLabel
+                                ).toString()
+                            } catch (e: Exception) {
+                                when (phoneType) {
+                                    ContactsContract.CommonDataKinds.Phone.TYPE_WORK -> "Office"
+                                    ContactsContract.CommonDataKinds.Phone.TYPE_HOME -> "Home"
+                                    ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE -> "Mobile"
+                                    else -> "Phone"
+                                }
+                            }
+
+                            val cleanLabel = if (typeLabel.isNotBlank()) typeLabel else "Mobile"
+                            val last4 = if (cleanNumber.length >= 4) cleanNumber.takeLast(4) else cleanNumber
+                            val option = PhoneNumberOption(
+                                number = cleanNumber,
+                                label = cleanLabel,
+                                lastFourDigits = last4,
+                                optionIndex = entry.third.size + 1,
+                                contactName = name
+                            )
+                            entry.third.add(option)
                         }
                     }
                 }
@@ -60,11 +92,12 @@ class ContactManager(private val context: Context) {
             Log.e(TAG, "Error querying contacts", e)
         }
 
-        return contactsMap.map { (id, pair) ->
+        return contactsMap.map { (id, triple) ->
             Contact(
                 id = id,
-                name = pair.first,
-                phoneNumbers = pair.second
+                name = triple.first,
+                phoneNumbers = triple.second,
+                labeledPhoneNumbers = triple.third
             )
         }
     }
@@ -92,7 +125,8 @@ class ContactManager(private val context: Context) {
     /**
      * Finds the best contact match for a given name query.
      * Returns:
-     * - SingleMatch if exactly one contact matches or one clear top match
+     * - SingleMatch if exactly one contact matches and has 1 number
+     * - DisambiguationRequired if contact has multiple phone numbers
      * - MultipleMatches if multiple contacts match with close scores
      * - NoMatch if no contact reaches threshold
      */
@@ -122,9 +156,14 @@ class ContactManager(private val context: Context) {
 
         return if (topMatches.size == 1) {
             val contact: Contact = topMatches.first().first
-            val phone: String = contact.primaryPhoneNumber
-            ContactMatchResult.SingleMatch(contact, phone)
+            if (contact.labeledPhoneNumbers.size > 1) {
+                ContactMatchResult.DisambiguationRequired(contact.name, contact.labeledPhoneNumbers)
+            } else {
+                val phone: String = contact.primaryPhoneNumber
+                ContactMatchResult.SingleMatch(contact, phone)
+            }
         } else {
+            // Multiple contacts found - also create options for them
             ContactMatchResult.MultipleMatches(topMatches.map { it.first })
         }
     }

@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.manager.BengaliHindiEnglishMatcher
 import com.example.manager.CallManager
 import com.example.manager.ContactManager
+import com.example.manager.DisambiguationResolver
 import com.example.manager.LanguageManager
 import com.example.manager.ParsedVoiceCommand
 import com.example.manager.SpeechManager
@@ -15,6 +16,7 @@ import com.example.manager.WakeNameDetector
 import com.example.model.AssistantListeningMode
 import com.example.model.Contact
 import com.example.model.ContactMatchResult
+import com.example.model.PhoneNumberOption
 import com.example.model.SupportedLanguage
 import com.example.model.VoiceGender
 import kotlinx.coroutines.Job
@@ -35,6 +37,7 @@ data class AssistantUiState(
     val recognizedText: String = "",
     val responseText: String = "Say \"VirJoy\" to activate",
     val multipleMatches: List<Contact> = emptyList(),
+    val disambiguationOptions: List<PhoneNumberOption> = emptyList(),
     val isSettingsOpen: Boolean = false,
     val hasAllPermissions: Boolean = false,
     val rmsLevel: Float = 0f,
@@ -115,15 +118,15 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun handleSpeechError(error: String) {
-        if (_uiState.value.listeningMode == AssistantListeningMode.COMMAND_LISTENING) {
+        val mode = _uiState.value.listeningMode
+        if (mode == AssistantListeningMode.COMMAND_LISTENING || mode == AssistantListeningMode.DISAMBIGUATION_LISTENING) {
             _uiState.update { it.copy(isListening = false, responseText = error, rmsLevel = 0f) }
-            // If command listening failed, schedule return to wake listening
             startCommandTimeoutJob(3000L)
         } else {
             // In wake listening mode, keep UI clean and silently continue wake monitoring
             _uiState.update { it.copy(isListening = false, rmsLevel = 0f) }
             if (_uiState.value.hasAllPermissions && _uiState.value.isHandsFreeEnabled) {
-                speechManager?.scheduleRestartListening(_uiState.value.selectedLanguage, 500L)
+                speechManager?.scheduleRestartListening(_uiState.value.selectedLanguage, 800L)
             }
         }
     }
@@ -138,8 +141,9 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
 
         commandTimeoutJob?.cancel()
 
-        if (_uiState.value.isListening && _uiState.value.listeningMode == AssistantListeningMode.COMMAND_LISTENING) {
-            // Cancel active command listening and return to wake listening
+        val currentMode = _uiState.value.listeningMode
+        if (_uiState.value.isListening && (currentMode == AssistantListeningMode.COMMAND_LISTENING || currentMode == AssistantListeningMode.DISAMBIGUATION_LISTENING)) {
+            // Cancel active listening and return to wake listening
             returnToWakeListening()
         } else {
             // Manual activation directly enters COMMAND_LISTENING
@@ -148,7 +152,8 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                     listeningMode = AssistantListeningMode.COMMAND_LISTENING,
                     recognizedText = "",
                     responseText = "Listening... Speak now",
-                    multipleMatches = emptyList()
+                    multipleMatches = emptyList(),
+                    disambiguationOptions = emptyList()
                 )
             }
             speechManager?.startCommandListening(_uiState.value.selectedLanguage)
@@ -161,56 +166,85 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         val preferredLang = _uiState.value.selectedLanguage
         val configuredWake = _uiState.value.wakeName
 
-        if (currentMode == AssistantListeningMode.WAKE_LISTENING) {
-            // 1. Lightweight local wake name detection
-            val wakeMatch = WakeNameDetector.checkWakeName(rawText, configuredWake)
-            if (!wakeMatch.isWakeWordDetected) {
-                // Ignore background conversation without wake word
-                if (_uiState.value.hasAllPermissions && _uiState.value.isHandsFreeEnabled) {
-                    speechManager?.scheduleRestartListening(preferredLang, 300L)
+        when (currentMode) {
+            AssistantListeningMode.WAKE_LISTENING -> {
+                // Lightweight local wake name detection
+                val wakeMatch = WakeNameDetector.checkWakeName(rawText, configuredWake)
+                if (!wakeMatch.isWakeWordDetected) {
+                    // Ignore background conversation without wake word
+                    if (_uiState.value.hasAllPermissions && _uiState.value.isHandsFreeEnabled) {
+                        speechManager?.scheduleRestartListening(preferredLang, 800L)
+                    }
+                    return
                 }
-                return
-            }
 
-            // Wake name detected!
-            _uiState.update {
-                it.copy(
-                    recognizedText = rawText,
-                    multipleMatches = emptyList()
-                )
-            }
-
-            if (wakeMatch.remainingCommand.isNotBlank()) {
-                // Wake name + Command in same utterance (e.g. "রাম, বাবুকে কল করো")
-                _uiState.update {
-                    it.copy(listeningMode = AssistantListeningMode.COMMAND_LISTENING)
-                }
-                executeParsedCommand(wakeMatch.remainingCommand)
-            } else {
-                // Wake name alone (e.g. "রাম" / "Ram")
-                // Transition to COMMAND_LISTENING, give audible acknowledgement ("Yes?"), then listen for command
+                // Wake name detected!
                 _uiState.update {
                     it.copy(
-                        listeningMode = AssistantListeningMode.COMMAND_LISTENING,
-                        responseText = LanguageManager.getListeningForCommandPrompt(preferredLang)
+                        recognizedText = rawText,
+                        multipleMatches = emptyList(),
+                        disambiguationOptions = emptyList()
                     )
                 }
 
-                val ackMessage = LanguageManager.getWakeAcknowledgementMessage(preferredLang)
-                speechManager?.speak(ackMessage, preferredLang) {
-                    if (_uiState.value.listeningMode == AssistantListeningMode.COMMAND_LISTENING) {
-                        speechManager?.startCommandListening(preferredLang)
-                        startCommandTimeoutJob(8000L)
+                if (wakeMatch.remainingCommand.isNotBlank()) {
+                    // Wake name + Command in same utterance (e.g. "রাম, বাবুকে কল করো")
+                    _uiState.update {
+                        it.copy(listeningMode = AssistantListeningMode.COMMAND_LISTENING)
+                    }
+                    executeParsedCommand(wakeMatch.remainingCommand)
+                } else {
+                    // Wake name alone (e.g. "রাম" / "Ram")
+                    // Transition to COMMAND_LISTENING, give audible acknowledgement ("Yes?"), then listen for command
+                    _uiState.update {
+                        it.copy(
+                            listeningMode = AssistantListeningMode.COMMAND_LISTENING,
+                            responseText = LanguageManager.getListeningForCommandPrompt(preferredLang)
+                        )
+                    }
+
+                    val ackMessage = LanguageManager.getWakeAcknowledgementMessage(preferredLang)
+                    speechManager?.speak(ackMessage, preferredLang) {
+                        if (_uiState.value.listeningMode == AssistantListeningMode.COMMAND_LISTENING) {
+                            speechManager?.startCommandListening(preferredLang)
+                            startCommandTimeoutJob(8000L)
+                        }
                     }
                 }
             }
-        } else {
-            // In COMMAND_LISTENING mode
-            commandTimeoutJob?.cancel()
-            _uiState.update {
-                it.copy(recognizedText = rawText)
+            AssistantListeningMode.DISAMBIGUATION_LISTENING -> {
+                commandTimeoutJob?.cancel()
+                _uiState.update { it.copy(recognizedText = rawText) }
+
+                val options = _uiState.value.disambiguationOptions
+                val lang = _uiState.value.currentLanguage
+                val resolved = DisambiguationResolver.resolveOption(rawText, options, lang)
+
+                if (resolved != null) {
+                    initiateCall(resolved.contactName, resolved.number, lang)
+                } else {
+                    // Could not match voice option, prompt again or timeout
+                    val retryMsg = when (lang) {
+                        SupportedLanguage.BENGALI -> "বুঝতে পারিনি। ১ নম্বর নাকি ২ নম্বর?"
+                        SupportedLanguage.HINDI -> "समझ नहीं आया। एक नंबर या दो नंबर?"
+                        else -> "Could not understand. Option 1 or Option 2?"
+                    }
+                    _uiState.update { it.copy(responseText = retryMsg) }
+                    speechManager?.speak(retryMsg, lang) {
+                        if (_uiState.value.listeningMode == AssistantListeningMode.DISAMBIGUATION_LISTENING) {
+                            speechManager?.startCommandListening(lang)
+                            startCommandTimeoutJob(8000L)
+                        }
+                    }
+                }
             }
-            executeParsedCommand(rawText)
+            AssistantListeningMode.COMMAND_LISTENING, AssistantListeningMode.INACTIVE -> {
+                commandTimeoutJob?.cancel()
+                _uiState.update {
+                    it.copy(recognizedText = rawText)
+                }
+                executeParsedCommand(rawText)
+            }
         }
     }
 
@@ -252,7 +286,8 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                     _uiState.update {
                         it.copy(
                             responseText = message,
-                            multipleMatches = emptyList()
+                            multipleMatches = emptyList(),
+                            disambiguationOptions = emptyList()
                         )
                     }
                     speechManager?.speak(message, language) {
@@ -260,24 +295,64 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
             }
-            is ContactMatchResult.MultipleMatches -> {
-                val message = LanguageManager.getMultipleMatchesMessage(language)
+            is ContactMatchResult.DisambiguationRequired -> {
+                val spokenPrompt = LanguageManager.formatMultiNumberDisambiguationPrompt(
+                    matchResult.contactName,
+                    matchResult.options,
+                    language
+                )
                 _uiState.update {
                     it.copy(
-                        responseText = message,
+                        listeningMode = AssistantListeningMode.DISAMBIGUATION_LISTENING,
+                        responseText = spokenPrompt,
+                        disambiguationOptions = matchResult.options,
+                        multipleMatches = emptyList()
+                    )
+                }
+                speechManager?.speak(spokenPrompt, language) {
+                    if (_uiState.value.listeningMode == AssistantListeningMode.DISAMBIGUATION_LISTENING) {
+                        speechManager?.startCommandListening(language)
+                        startCommandTimeoutJob(12000L)
+                    }
+                }
+            }
+            is ContactMatchResult.MultipleMatches -> {
+                val options = matchResult.contacts.mapIndexed { idx, c ->
+                    PhoneNumberOption(
+                        number = c.primaryPhoneNumber,
+                        label = c.name,
+                        lastFourDigits = c.primaryPhoneNumber.takeLast(4),
+                        optionIndex = idx + 1,
+                        contactName = c.name
+                    )
+                }
+                val spokenPrompt = LanguageManager.formatMultiNumberDisambiguationPrompt(
+                    targetName,
+                    options,
+                    language
+                )
+                _uiState.update {
+                    it.copy(
+                        listeningMode = AssistantListeningMode.DISAMBIGUATION_LISTENING,
+                        responseText = spokenPrompt,
+                        disambiguationOptions = options,
                         multipleMatches = matchResult.contacts
                     )
                 }
-                speechManager?.speak(message, language)
-                // Keep multiple matches for user selection, then return to wake listening on timeout
-                startCommandTimeoutJob(15000L)
+                speechManager?.speak(spokenPrompt, language) {
+                    if (_uiState.value.listeningMode == AssistantListeningMode.DISAMBIGUATION_LISTENING) {
+                        speechManager?.startCommandListening(language)
+                        startCommandTimeoutJob(12000L)
+                    }
+                }
             }
             is ContactMatchResult.NoMatch -> {
                 val message = LanguageManager.getNoMatchMessage(targetName, language)
                 _uiState.update {
                     it.copy(
                         responseText = message,
-                        multipleMatches = emptyList()
+                        multipleMatches = emptyList(),
+                        disambiguationOptions = emptyList()
                     )
                 }
                 speechManager?.speak(message, language) {
@@ -295,10 +370,18 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
             initiateCall(contact.name, phoneNumber, lang)
         } else {
             val message = LanguageManager.getNoPhoneNumberMessage(contact.name, lang)
-            _uiState.update { it.copy(responseText = message, multipleMatches = emptyList()) }
+            _uiState.update { it.copy(responseText = message, multipleMatches = emptyList(), disambiguationOptions = emptyList()) }
             speechManager?.speak(message, lang) {
                 returnToWakeListeningDelayed(2000L)
             }
+        }
+    }
+
+    fun selectOptionToCall(option: PhoneNumberOption) {
+        commandTimeoutJob?.cancel()
+        val lang = lastDetectedLanguage
+        if (option.number.isNotEmpty()) {
+            initiateCall(option.contactName, option.number, lang)
         }
     }
 
@@ -307,7 +390,8 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         _uiState.update {
             it.copy(
                 responseText = message,
-                multipleMatches = emptyList()
+                multipleMatches = emptyList(),
+                disambiguationOptions = emptyList()
             )
         }
         speechManager?.speak(message, language) {
@@ -330,7 +414,8 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         commandTimeoutJob?.cancel()
         commandTimeoutJob = viewModelScope.launch {
             delay(delayMs)
-            if (_uiState.value.listeningMode == AssistantListeningMode.COMMAND_LISTENING) {
+            val currentMode = _uiState.value.listeningMode
+            if (currentMode == AssistantListeningMode.COMMAND_LISTENING || currentMode == AssistantListeningMode.DISAMBIGUATION_LISTENING) {
                 returnToWakeListening()
             }
         }
@@ -351,6 +436,7 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                 listeningMode = AssistantListeningMode.WAKE_LISTENING,
                 responseText = wakePrompt,
                 multipleMatches = emptyList(),
+                disambiguationOptions = emptyList(),
                 isListening = false,
                 rmsLevel = 0f
             )
@@ -445,3 +531,4 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         speechManager?.destroy()
     }
 }
+

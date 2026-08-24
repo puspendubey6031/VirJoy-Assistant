@@ -391,4 +391,82 @@ class VoiceAndMatcherTest {
             assertTrue("Command prompt for ${lang.code} should not be empty", commandPrompt.isNotEmpty())
         }
     }
+
+    // ==========================================
+    // 6. Voice-Only Disambiguation Tests
+    // ==========================================
+
+    @Test
+    fun testDisambiguationPromptGeneration() {
+        val options = listOf(
+            com.example.model.PhoneNumberOption(
+                number = "+919876543210",
+                label = "Mobile",
+                lastFourDigits = "3210",
+                optionIndex = 1,
+                contactName = "Rahul"
+            ),
+            com.example.model.PhoneNumberOption(
+                number = "+919876543211",
+                label = "Home",
+                lastFourDigits = "3211",
+                optionIndex = 2,
+                contactName = "Rahul"
+            )
+        )
+
+        val bengaliPrompt = LanguageManager.formatMultiNumberDisambiguationPrompt("Rahul", options, SupportedLanguage.BENGALI)
+        assertTrue("Bengali prompt should contain contact name", bengaliPrompt.contains("Rahul"))
+        assertTrue("Bengali prompt should contain option 1", bengaliPrompt.contains("এক নম্বর"))
+        assertTrue("Bengali prompt should contain option 2", bengaliPrompt.contains("দুই নম্বর"))
+
+        val englishPrompt = LanguageManager.formatMultiNumberDisambiguationPrompt("Rahul", options, SupportedLanguage.ENGLISH)
+        assertTrue("English prompt should contain contact name", englishPrompt.contains("Rahul"))
+        assertTrue("English prompt should contain 'Option 1'", englishPrompt.contains("Option 1"))
+    }
+
+    @Test
+    fun testDisambiguationResolver_ResolvingBySpokenOrdinalOrIndex() {
+        val options = listOf(
+            com.example.model.PhoneNumberOption(
+                number = "+919876543210",
+                label = "Mobile",
+                lastFourDigits = "3210",
+                optionIndex = 1,
+                contactName = "Rahul"
+            ),
+            com.example.model.PhoneNumberOption(
+                number = "+919876543211",
+                label = "Home",
+                lastFourDigits = "3211",
+                optionIndex = 2,
+                contactName = "Rahul"
+            )
+        )
+
+        // 1. Spoken "১" / "প্রথমটি" in Bengali
+        val match1 = com.example.manager.DisambiguationResolver.resolveOption("১ নম্বর", options, SupportedLanguage.BENGALI)
+        assertEquals(1, match1?.optionIndex)
+
+        val match2 = com.example.manager.DisambiguationResolver.resolveOption("দ্বিতীয়টি", options, SupportedLanguage.BENGALI)
+        assertEquals(2, match2?.optionIndex)
+
+        // 2. Spoken "first" / "2" in English
+        val match3 = com.example.manager.DisambiguationResolver.resolveOption("call the first one", options, SupportedLanguage.ENGLISH)
+        assertEquals(1, match3?.optionIndex)
+
+        val match4 = com.example.manager.DisambiguationResolver.resolveOption("option 2", options, SupportedLanguage.ENGLISH)
+        assertEquals(2, match4?.optionIndex)
+
+        // 3. Spoken label "home" / "mobile"
+        val match5 = com.example.manager.DisambiguationResolver.resolveOption("mobile", options, SupportedLanguage.ENGLISH)
+        assertEquals(1, match5?.optionIndex)
+
+        val match6 = com.example.manager.DisambiguationResolver.resolveOption("home", options, SupportedLanguage.ENGLISH)
+        assertEquals(2, match6?.optionIndex)
+
+        // 4. Spoken last 4 digits "3211"
+        val match7 = com.example.manager.DisambiguationResolver.resolveOption("3211 নম্বরে লাগাও", options, SupportedLanguage.BENGALI)
+        assertEquals(2, match7?.optionIndex)
+    }
 }

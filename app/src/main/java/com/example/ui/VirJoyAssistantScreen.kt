@@ -20,13 +20,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Call
@@ -34,6 +37,7 @@ import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
@@ -45,7 +49,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -77,10 +80,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.model.AssistantListeningMode
 import com.example.model.Contact
+import com.example.model.PhoneNumberOption
 import com.example.model.SupportedLanguage
 import com.example.model.VoiceGender
 import com.example.viewmodel.AssistantUiState
@@ -165,6 +171,7 @@ fun VirJoyAssistantScreen(
                     uiState = uiState,
                     onMicClicked = { viewModel.onMicClicked() },
                     onContactSelected = { contact -> viewModel.selectContactToCall(contact) },
+                    onOptionSelected = { option -> viewModel.selectOptionToCall(option) },
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -191,6 +198,7 @@ private fun AssistantContent(
     uiState: AssistantUiState,
     onMicClicked: () -> Unit,
     onContactSelected: (Contact) -> Unit,
+    onOptionSelected: (PhoneNumberOption) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -298,8 +306,14 @@ private fun AssistantContent(
                 }
             }
 
-            // Multiple contacts selector list (if disambiguation is needed)
-            if (uiState.multipleMatches.isNotEmpty()) {
+            // Disambiguation phone options (Voice-first or tap)
+            if (uiState.disambiguationOptions.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                DisambiguationOptionsList(
+                    options = uiState.disambiguationOptions,
+                    onOptionSelected = onOptionSelected
+                )
+            } else if (uiState.multipleMatches.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
                 MultipleContactsList(
                     contacts = uiState.multipleMatches,
@@ -323,35 +337,39 @@ private fun AssistantContent(
 
 @Composable
 private fun StatusBadge(
-    listeningMode: com.example.model.AssistantListeningMode,
+    listeningMode: AssistantListeningMode,
     isListening: Boolean,
     wakeName: String,
     isHandsFree: Boolean
 ) {
     val backgroundColor = when (listeningMode) {
-        com.example.model.AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.errorContainer
-        com.example.model.AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.secondaryContainer
-        com.example.model.AssistantListeningMode.INACTIVE -> MaterialTheme.colorScheme.surfaceVariant
+        AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.errorContainer
+        AssistantListeningMode.DISAMBIGUATION_LISTENING -> MaterialTheme.colorScheme.tertiaryContainer
+        AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.secondaryContainer
+        AssistantListeningMode.INACTIVE -> MaterialTheme.colorScheme.surfaceVariant
     }
 
     val contentColor = when (listeningMode) {
-        com.example.model.AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.onErrorContainer
-        com.example.model.AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.onSecondaryContainer
-        com.example.model.AssistantListeningMode.INACTIVE -> MaterialTheme.colorScheme.onSurfaceVariant
+        AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.onErrorContainer
+        AssistantListeningMode.DISAMBIGUATION_LISTENING -> MaterialTheme.colorScheme.onTertiaryContainer
+        AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.onSecondaryContainer
+        AssistantListeningMode.INACTIVE -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     val text = when (listeningMode) {
-        com.example.model.AssistantListeningMode.COMMAND_LISTENING -> "Listening for command..."
-        com.example.model.AssistantListeningMode.WAKE_LISTENING -> {
+        AssistantListeningMode.COMMAND_LISTENING -> "Listening for command..."
+        AssistantListeningMode.DISAMBIGUATION_LISTENING -> "Listening: Choose number / option..."
+        AssistantListeningMode.WAKE_LISTENING -> {
             if (isHandsFree) "Hands-Free: Listening for \"$wakeName\"" else "Tap Mic to speak"
         }
-        com.example.model.AssistantListeningMode.INACTIVE -> "Paused / Permissions Required"
+        AssistantListeningMode.INACTIVE -> "Paused / Permissions Required"
     }
 
     val dotColor = when (listeningMode) {
-        com.example.model.AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.error
-        com.example.model.AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.primary
-        com.example.model.AssistantListeningMode.INACTIVE -> MaterialTheme.colorScheme.outline
+        AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.error
+        AssistantListeningMode.DISAMBIGUATION_LISTENING -> MaterialTheme.colorScheme.tertiary
+        AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.primary
+        AssistantListeningMode.INACTIVE -> MaterialTheme.colorScheme.outline
     }
 
     Surface(
@@ -381,6 +399,93 @@ private fun StatusBadge(
 }
 
 @Composable
+private fun DisambiguationOptionsList(
+    options: List<PhoneNumberOption>,
+    onOptionSelected: (PhoneNumberOption) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+    ) {
+        Text(
+            text = "Say the number option (e.g. \"1\", \"2\", \"Mobile\") or tap below:",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 180.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(options, key = { "${it.contactName}_${it.optionIndex}_${it.number}" }) { option ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("option_item_${option.optionIndex}")
+                        .clickable { onOptionSelected(option) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "${option.optionIndex}",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "${option.contactName} (${option.label})",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Text(
+                                    text = option.number,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        FilledIconButton(
+                            onClick = { onOptionSelected(option) },
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Call,
+                                contentDescription = "Call ${option.number}"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MultipleContactsList(
     contacts: List<Contact>,
     onContactSelected: (Contact) -> Unit
@@ -400,7 +505,7 @@ private fun MultipleContactsList(
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(180.dp),
+                .heightIn(max = 180.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(contacts, key = { it.id }) { contact ->
@@ -463,15 +568,15 @@ private fun MultipleContactsList(
 
 @Composable
 private fun MicButtonSection(
-    listeningMode: com.example.model.AssistantListeningMode,
+    listeningMode: AssistantListeningMode,
     isListening: Boolean,
     onClick: () -> Unit
 ) {
-    val isCommandMode = listeningMode == com.example.model.AssistantListeningMode.COMMAND_LISTENING
+    val isActiveMode = listeningMode == AssistantListeningMode.COMMAND_LISTENING || listeningMode == AssistantListeningMode.DISAMBIGUATION_LISTENING
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
-        targetValue = if (isCommandMode || isListening) 1.15f else 1.0f,
+        targetValue = if (isActiveMode || isListening) 1.15f else 1.0f,
         animationSpec = infiniteRepeatable(
             animation = tween(800, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -485,14 +590,14 @@ private fun MicButtonSection(
         Box(
             contentAlignment = Alignment.Center
         ) {
-            if (isCommandMode || isListening) {
+            if (isActiveMode || isListening) {
                 Box(
                     modifier = Modifier
                         .size(110.dp)
                         .scale(pulseScale)
                         .clip(CircleShape)
                         .background(
-                            if (isCommandMode) MaterialTheme.colorScheme.error.copy(alpha = 0.25f)
+                            if (isActiveMode) MaterialTheme.colorScheme.error.copy(alpha = 0.25f)
                             else MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
                         )
                 )
@@ -504,7 +609,7 @@ private fun MicButtonSection(
                     .size(88.dp)
                     .testTag("mic_button"),
                 shape = CircleShape,
-                color = if (isCommandMode) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                color = if (isActiveMode) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                 shadowElevation = 6.dp
             ) {
                 Box(
@@ -513,7 +618,7 @@ private fun MicButtonSection(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Mic,
-                        contentDescription = if (isCommandMode) "Cancel Command Listening" else "Manual Voice Command",
+                        contentDescription = if (isActiveMode) "Cancel Command Listening" else "Manual Voice Command",
                         tint = Color.White,
                         modifier = Modifier.size(44.dp)
                     )
@@ -524,7 +629,7 @@ private fun MicButtonSection(
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-            text = if (isCommandMode) "Listening for command..." else "Tap for manual command",
+            text = if (isActiveMode) "Listening for command..." else "Tap for manual command",
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -601,19 +706,15 @@ fun SettingsDialog(
     var handsFreeState by remember { mutableStateOf(isHandsFree) }
     var isLanguageDropdownExpanded by remember { mutableStateOf(false) }
 
-    val wakePresets = listOf(
-        "VirJoy",
-        "Ram" to "রাম",
-        "Sam" to "স্যাম",
-        "Yadu" to "যদু",
-        "Madhu" to "মধু"
-    )
-
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+                .fillMaxWidth(0.92f)
+                .heightIn(max = 600.dp)
+                .padding(vertical = 16.dp),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface
@@ -622,8 +723,9 @@ fun SettingsDialog(
         ) {
             Column(
                 modifier = Modifier
-                    .padding(24.dp)
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp)
             ) {
                 Text(
                     text = stringResource(R.string.settings_title),
@@ -633,7 +735,7 @@ fun SettingsDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Wake Name / Activation Name Input
+                // Assistant Wake Name / Activation Name Input
                 Text(
                     text = stringResource(R.string.wake_name_label),
                     style = MaterialTheme.typography.labelLarge,
@@ -644,7 +746,7 @@ fun SettingsDialog(
                 TextField(
                     value = wakeNameState,
                     onValueChange = { wakeNameState = it },
-                    placeholder = { Text("e.g. Ram, রাম, Sam, Yadu, Madhu") },
+                    placeholder = { Text("e.g. VirJoy, Ram, স্যাম, যদু") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("wake_name_input"),
@@ -656,41 +758,7 @@ fun SettingsDialog(
                     shape = RoundedCornerShape(12.dp)
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Wake Name Quick Presets
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    FilterChip(
-                        selected = wakeNameState.equals("VirJoy", ignoreCase = true),
-                        onClick = { wakeNameState = "VirJoy" },
-                        label = { Text("VirJoy", style = MaterialTheme.typography.labelSmall) }
-                    )
-                    FilterChip(
-                        selected = wakeNameState.contains("Ram", ignoreCase = true) || wakeNameState.contains("রাম"),
-                        onClick = { wakeNameState = "রাম" },
-                        label = { Text("রাম", style = MaterialTheme.typography.labelSmall) }
-                    )
-                    FilterChip(
-                        selected = wakeNameState.contains("Sam", ignoreCase = true) || wakeNameState.contains("স্যাম"),
-                        onClick = { wakeNameState = "স্যাম" },
-                        label = { Text("স্যাম", style = MaterialTheme.typography.labelSmall) }
-                    )
-                    FilterChip(
-                        selected = wakeNameState.contains("Yadu", ignoreCase = true) || wakeNameState.contains("যদু"),
-                        onClick = { wakeNameState = "যদু" },
-                        label = { Text("যদু", style = MaterialTheme.typography.labelSmall) }
-                    )
-                    FilterChip(
-                        selected = wakeNameState.contains("Madhu", ignoreCase = true) || wakeNameState.contains("মধু"),
-                        onClick = { wakeNameState = "মধু" },
-                        label = { Text("মধু", style = MaterialTheme.typography.labelSmall) }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Hands-Free Activation Switch
                 Row(
@@ -719,7 +787,7 @@ fun SettingsDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Assistant Display Name Input
                 Text(
@@ -742,7 +810,7 @@ fun SettingsDialog(
                     shape = RoundedCornerShape(12.dp)
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Language Selection (12 Indian Languages)
                 Text(
@@ -795,8 +863,8 @@ fun SettingsDialog(
                         expanded = isLanguageDropdownExpanded,
                         onDismissRequest = { isLanguageDropdownExpanded = false },
                         modifier = Modifier
-                            .fillMaxWidth(0.75f)
-                            .height(260.dp)
+                            .fillMaxWidth(0.85f)
+                            .heightIn(max = 280.dp)
                     ) {
                         SupportedLanguage.ALL_12_INDIAN_LANGUAGES.forEach { lang ->
                             DropdownMenuItem(
@@ -817,7 +885,7 @@ fun SettingsDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Voice Selection: Male / Female (Independent setting)
                 Text(
@@ -860,7 +928,7 @@ fun SettingsDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -916,3 +984,4 @@ fun SettingsDialog(
         onSave = { name, voice, _ -> onSave(name, voice) }
     )
 }
+

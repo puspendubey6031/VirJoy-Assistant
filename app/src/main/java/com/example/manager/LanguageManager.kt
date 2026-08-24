@@ -1,5 +1,6 @@
 package com.example.manager
 
+import com.example.model.PhoneNumberOption
 import com.example.model.SupportedLanguage
 import java.util.Locale
 
@@ -286,6 +287,108 @@ object LanguageManager {
             SupportedLanguage.TELUGU -> "\"$wakeName\" అని చెప్పి ప్రారంభించండి"
             SupportedLanguage.URDU -> "\"$wakeName\" کہہ کر شروع کریں"
             SupportedLanguage.ENGLISH -> "Say \"$wakeName\" to activate"
+        }
+    }
+
+    /**
+     * Formats spoken disambiguation prompt when a contact has multiple numbers.
+     * Matches the required natural spoken style:
+     * "[Name] নামে [X]টি নম্বর পেয়েছি। এক নম্বর — Mobile, শেষ চার সংখ্যা [digits]... কোনটিতে কল করব?"
+     */
+    fun formatMultiNumberDisambiguationPrompt(
+        contactName: String,
+        options: List<PhoneNumberOption>,
+        lang: SupportedLanguage
+    ): String {
+        val count = options.size
+        val countWord = when (lang) {
+            SupportedLanguage.BENGALI -> when (count) { 2 -> "দুটি"; 3 -> "তিনটি"; 4 -> "চারটি"; else -> "$count টি" }
+            SupportedLanguage.HINDI -> when (count) { 2 -> "दो"; 3 -> "तीन"; 4 -> "चार"; else -> "$count" }
+            SupportedLanguage.ASSAMESE -> when (count) { 2 -> "দুটা"; 3 -> "তিনিটা"; else -> "$count টা" }
+            SupportedLanguage.MARATHI -> when (count) { 2 -> "दोन"; 3 -> "तीन"; else -> "$count" }
+            SupportedLanguage.GUJARATI -> when (count) { 2 -> "બે"; 3 -> "ત્રણ"; else -> "$count" }
+            SupportedLanguage.PUNJABI -> when (count) { 2 -> "ਦੋ"; 3 -> "ਤਿੰਨ"; else -> "$count" }
+            SupportedLanguage.ODIA -> when (count) { 2 -> "ଦୁଇଟି"; 3 -> "ତିନୋଟି"; else -> "$count ଟି" }
+            SupportedLanguage.TAMIL -> when (count) { 2 -> "இரண்டு"; 3 -> "மூன்று"; else -> "$count" }
+            SupportedLanguage.TELUGU -> when (count) { 2 -> "రెండు"; 3 -> "మూడు"; else -> "$count" }
+            SupportedLanguage.KANNADA -> when (count) { 2 -> "ಎರಡು"; 3 -> "ಮೂರು"; else -> "$count" }
+            SupportedLanguage.MALAYALAM -> when (count) { 2 -> "രണ്ട്"; 3 -> "മൂന്ന്"; else -> "$count" }
+            SupportedLanguage.URDU -> when (count) { 2 -> "دو"; 3 -> "تین"; else -> "$count" }
+            SupportedLanguage.ENGLISH -> "$count"
+        }
+
+        val header = when (lang) {
+            SupportedLanguage.BENGALI -> "$contactName নামে $countWord নম্বর পেয়েছি।"
+            SupportedLanguage.HINDI -> "$contactName नाम के $countWord नंबर मिले हैं।"
+            SupportedLanguage.ASSAMESE -> "$contactName নামত $countWord নম্বৰ পোৱা গৈছে।"
+            SupportedLanguage.GUJARATI -> "$contactName માટે $countWord નંબર મળ્યા છે."
+            SupportedLanguage.KANNADA -> "$contactName ಗೆ $countWord ಸಂಖ್ಯೆಗಳು ಕಂಡುಬಂದಿವೆ."
+            SupportedLanguage.MALAYALAM -> "$contactName-ന് $countWord നമ്പറുകൾ കണ്ടെത്തി."
+            SupportedLanguage.MARATHI -> "$contactName साठी $countWord नंबर सापडले आहेत."
+            SupportedLanguage.ODIA -> "$contactName ପାଇଁ $countWord ନମ୍ବର ମିଳିଲା।"
+            SupportedLanguage.PUNJABI -> "$contactName ਲਈ $countWord ਨੰਬਰ ਮਿਲੇ ਹਨ।"
+            SupportedLanguage.TAMIL -> "$contactName-க்கு $countWord எண்கள் கிடைத்துள்ளன."
+            SupportedLanguage.TELUGU -> "$contactName కి $countWord నంబర్లు ఉన్నాయి."
+            SupportedLanguage.URDU -> "$contactName کے $countWord نمبر ملے۔"
+            SupportedLanguage.ENGLISH -> "Found $countWord numbers for $contactName."
+        }
+
+        val optionLines = options.map { opt ->
+            val idx = opt.optionIndex
+            val indicDigits = DisambiguationResolver.toIndicDigits(opt.lastFourDigits, lang)
+            val ordinal = getOrdinalIndexWord(idx, lang)
+
+            when (lang) {
+                SupportedLanguage.BENGALI -> "$ordinal — ${opt.label}, শেষ চার সংখ্যা $indicDigits।"
+                SupportedLanguage.HINDI -> "$ordinal — ${opt.label}, अंतिम चार अंक $indicDigits।"
+                SupportedLanguage.ASSAMESE -> "$ordinal — ${opt.label}, শেষ চাৰিটা সংখ্যা $indicDigits।"
+                SupportedLanguage.GUJARATI -> "$ordinal — ${opt.label}, છેલ્લા ચાર અંક $indicDigits."
+                SupportedLanguage.KANNADA -> "$ordinal — ${opt.label}, ಕೊನೆಯ ನಾಲ್ಕು ಅಂಕಿಗಳು $indicDigits."
+                SupportedLanguage.MALAYALAM -> "$ordinal — ${opt.label}, അവസാന നാല് അക്കങ്ങൾ $indicDigits."
+                SupportedLanguage.MARATHI -> "$ordinal — ${opt.label}, शेवटचे चार अंक $indicDigits."
+                SupportedLanguage.ODIA -> "$ordinal — ${opt.label}, ଶେଷ ଚାରିଟି ଅଙ୍କ $indicDigits।"
+                SupportedLanguage.PUNJABI -> "$ordinal — ${opt.label}, ਆਖਰੀ ਚਾਰ ਅੰਕ $indicDigits।"
+                SupportedLanguage.TAMIL -> "$ordinal — ${opt.label}, கடைசி நான்கு இலக்கங்கள் $indicDigits."
+                SupportedLanguage.TELUGU -> "$ordinal — ${opt.label}, చివరి నాలుగు అంకెలు $indicDigits."
+                SupportedLanguage.URDU -> "$ordinal — ${opt.label}, آخری چار ہندسے $indicDigits۔"
+                SupportedLanguage.ENGLISH -> "$ordinal — ${opt.label}, ending in ${opt.lastFourDigits}."
+            }
+        }.joinToString("\n")
+
+        val question = when (lang) {
+            SupportedLanguage.BENGALI -> "কোনটিতে কল করব?"
+            SupportedLanguage.HINDI -> "किस पर कॉल करूँ?"
+            SupportedLanguage.ASSAMESE -> "কোনটোত কল কৰিম?"
+            SupportedLanguage.GUJARATI -> "કયા નંબર પર કોલ કરું?"
+            SupportedLanguage.KANNADA -> "ಯಾವ ಸಂಖ್ಯೆಗೆ ಕರೆ ಮಾಡಲಿ?"
+            SupportedLanguage.MALAYALAM -> "ഏതിലേക്ക് വിളിക്കണം?"
+            SupportedLanguage.MARATHI -> "कोणत्या नंबरवर कॉल करू?"
+            SupportedLanguage.ODIA -> "କେଉଁଥିରେ କଲ୍ କରିବି?"
+            SupportedLanguage.PUNJABI -> "ਕਿਸ ਉੱਤੇ ਕਾਲ ਕਰਾਂ?"
+            SupportedLanguage.TAMIL -> "எதற்கு அழைக்க வேண்டும்?"
+            SupportedLanguage.TELUGU -> "దేనికి కాల్ చేయాలి?"
+            SupportedLanguage.URDU -> "کس پر کال کروں؟"
+            SupportedLanguage.ENGLISH -> "Which one should I call?"
+        }
+
+        return "$header\n$optionLines\n$question"
+    }
+
+    private fun getOrdinalIndexWord(idx: Int, lang: SupportedLanguage): String {
+        return when (lang) {
+            SupportedLanguage.BENGALI -> when (idx) { 1 -> "এক নম্বর"; 2 -> "দুই নম্বর"; 3 -> "তিন নম্বর"; 4 -> "চার নম্বর"; else -> "$idx নম্বর" }
+            SupportedLanguage.HINDI -> when (idx) { 1 -> "एक नंबर"; 2 -> "दो नंबर"; 3 -> "तीन नंबर"; 4 -> "चार नंबर"; else -> "$idx नंबर" }
+            SupportedLanguage.ASSAMESE -> when (idx) { 1 -> "এক নম্বৰ"; 2 -> "দুই নম্বৰ"; 3 -> "তিনি নম্বৰ"; else -> "$idx নম্বৰ" }
+            SupportedLanguage.GUJARATI -> when (idx) { 1 -> "એક નંબર"; 2 -> "બે નંબર"; 3 -> "ત્રણ નંબર"; else -> "$idx નંબર" }
+            SupportedLanguage.KANNADA -> when (idx) { 1 -> "ಒಂದನೇ ಸಂಖ್ಯೆ"; 2 -> "ಎರಡನೇ ಸಂಖ್ಯೆ"; 3 -> "ಮೂರನೇ ಸಂಖ್ಯೆ"; else -> "$idx" }
+            SupportedLanguage.MALAYALAM -> when (idx) { 1 -> "ഒന്നാം നമ്പർ"; 2 -> "രണ്ടാം നമ്പർ"; 3 -> "മൂന്നാം നമ്പർ"; else -> "$idx" }
+            SupportedLanguage.MARATHI -> when (idx) { 1 -> "एक नंबर"; 2 -> "दोन नंबर"; 3 -> "तीन नंबर"; else -> "$idx नंबर" }
+            SupportedLanguage.ODIA -> when (idx) { 1 -> "ଏକ ନମ୍ବର"; 2 -> "ଦୁଇ ନମ୍ବର"; 3 -> "ତିନି ନମ୍ବର"; else -> "$idx ନମ୍ବର" }
+            SupportedLanguage.PUNJABI -> when (idx) { 1 -> "ਇੱਕ ਨੰਬਰ"; 2 -> "ਦੋ ਨੰਬਰ"; 3 -> "ਤਿੰਨ ਨੰਬਰ"; else -> "$idx ਨੰਬਰ" }
+            SupportedLanguage.TAMIL -> when (idx) { 1 -> "ஒன்றாம் எண்"; 2 -> "இரண்டாம் எண்"; 3 -> "மூன்றாம் எண்"; else -> "$idx" }
+            SupportedLanguage.TELUGU -> when (idx) { 1 -> "ఒకటో నంబరు"; 2 -> "రెండో నంబరు"; 3 -> "మూడో నంబరు"; else -> "$idx" }
+            SupportedLanguage.URDU -> when (idx) { 1 -> "پہلا نمبر"; 2 -> "دوسرا نمبر"; 3 -> "تیسرا نمبر"; else -> "$idx" }
+            SupportedLanguage.ENGLISH -> when (idx) { 1 -> "Option 1"; 2 -> "Option 2"; 3 -> "Option 3"; 4 -> "Option 4"; else -> "Option $idx" }
         }
     }
 

@@ -2,6 +2,7 @@ package com.example.manager
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -29,6 +30,7 @@ class SpeechManager(
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private var speechRecognizer: SpeechRecognizer? = null
     private var textToSpeech: TextToSpeech? = null
     private var isTtsInitialized = false
@@ -38,6 +40,7 @@ class SpeechManager(
     private var isWakeMode: Boolean = true
     private var isContinuousListeningEnabled: Boolean = true
     private var isDestroyed: Boolean = false
+    private var isSystemMutedForWake: Boolean = false
 
     init {
         initTts()
@@ -91,6 +94,30 @@ class SpeechManager(
         isContinuousListeningEnabled = enabled
         if (!enabled && isWakeMode) {
             stopListening()
+        }
+    }
+
+    private fun muteForSilentWakeListening() {
+        if (isWakeMode && !isSystemMutedForWake) {
+            try {
+                audioManager?.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_MUTE, 0)
+                audioManager?.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0)
+                isSystemMutedForWake = true
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not mute notification stream", e)
+            }
+        }
+    }
+
+    private fun unmuteSystemAudio() {
+        if (isSystemMutedForWake) {
+            try {
+                audioManager?.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_UNMUTE, 0)
+                audioManager?.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0)
+                isSystemMutedForWake = false
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not unmute notification stream", e)
+            }
         }
     }
 
@@ -172,6 +199,7 @@ class SpeechManager(
         language: SupportedLanguage = currentLanguage,
         onDone: (() -> Unit)? = null
     ) {
+        unmuteSystemAudio()
         if (!isTtsInitialized) {
             onDone?.invoke()
             return
@@ -227,6 +255,7 @@ class SpeechManager(
 
     fun startCommandListening(language: SupportedLanguage = currentLanguage) {
         isWakeMode = false
+        unmuteSystemAudio()
         startListeningInternal(language)
     }
 
@@ -247,6 +276,12 @@ class SpeechManager(
 
         mainHandler.removeCallbacksAndMessages(null)
         stopInternalRecognizer()
+
+        if (isWakeMode) {
+            muteForSilentWakeListening()
+        } else {
+            unmuteSystemAudio()
+        }
 
         try {
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
@@ -275,8 +310,8 @@ class SpeechManager(
                                 error == SpeechRecognizer.ERROR_CLIENT
 
                         if (isWakeMode && isContinuousListeningEnabled && isTransient && !isDestroyed) {
-                            // In hands-free wake mode, silently re-arm listening
-                            scheduleRestartListening(language, 300L)
+                            // In hands-free wake mode, silently and calmly re-arm listening
+                            scheduleRestartListening(language, 800L)
                         } else {
                             val errorMessage = when (error) {
                                 SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
@@ -302,7 +337,7 @@ class SpeechManager(
                             onSpeechResult(recognized)
                         } else {
                             if (isWakeMode && isContinuousListeningEnabled && !isDestroyed) {
-                                scheduleRestartListening(language, 300L)
+                                scheduleRestartListening(language, 800L)
                             } else {
                                 onError("No speech recognized.")
                             }
@@ -322,6 +357,9 @@ class SpeechManager(
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, language.code)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language.code)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 10000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
                 putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf(
                     "bn-IN", "hi-IN", "en-IN", "te-IN", "mr-IN", "ta-IN", "gu-IN", "kn-IN", "ml-IN", "pa-IN", "or-IN", "as-IN", "ur-IN"
                 ))
@@ -338,7 +376,7 @@ class SpeechManager(
         }
     }
 
-    fun scheduleRestartListening(language: SupportedLanguage = currentLanguage, delayMs: Long = 300L) {
+    fun scheduleRestartListening(language: SupportedLanguage = currentLanguage, delayMs: Long = 800L) {
         if (isDestroyed || !isContinuousListeningEnabled || isSpeaking) return
         mainHandler.removeCallbacksAndMessages(null)
         mainHandler.postDelayed({
@@ -367,6 +405,7 @@ class SpeechManager(
     fun stopListening() {
         mainHandler.removeCallbacksAndMessages(null)
         stopInternalRecognizer()
+        unmuteSystemAudio()
         onListeningStateChanged(false)
     }
 
@@ -374,6 +413,7 @@ class SpeechManager(
         isDestroyed = true
         mainHandler.removeCallbacksAndMessages(null)
         stopListening()
+        unmuteSystemAudio()
         try {
             textToSpeech?.stop()
             textToSpeech?.shutdown()
@@ -384,3 +424,4 @@ class SpeechManager(
         }
     }
 }
+
