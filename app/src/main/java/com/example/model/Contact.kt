@@ -20,7 +20,16 @@ enum class VoiceGender {
     FEMALE
 }
 
+enum class AssistantListeningMode {
+    INACTIVE,
+    WAKE_LISTENING,
+    COMMAND_LISTENING
+}
+
 data class AssistantSettings(
     val assistantName: String = "VirJoy Assistant",
-    val voiceGender: VoiceGender = VoiceGender.FEMALE
+    val wakeName: String = "VirJoy",
+    val voiceGender: VoiceGender = VoiceGender.FEMALE,
+    val selectedLanguage: SupportedLanguage = SupportedLanguage.ENGLISH,
+    val isHandsFreeEnabled: Boolean = true
 )

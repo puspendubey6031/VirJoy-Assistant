@@ -4,9 +4,13 @@
     <string name="listening_prompt">Listening... Speak now</string>
     <string name="idle_prompt">Tap the microphone to speak</string>
     <string name="settings_title">Assistant Settings</string>
-    <string name="voice_gender">Assistant Voice</string>
+    <string name="assistant_name_label">Assistant Name</string>
+    <string name="assistant_language_label">Recognition &amp; Voice Language</string>
+    <string name="voice_gender">Voice Gender</string>
     <string name="voice_male">Male</string>
     <string name="voice_female">Female</string>
+    <string name="cancel_button">Cancel</string>
+    <string name="save_button">Save</string>
     <string name="permission_required_title">Permissions Required</string>
     <string name="permission_required_desc">VirJoy Assistant needs Microphone, Contacts, and Call Phone permissions to process voice commands and make calls.</string>
     <string name="grant_permissions">Grant Permissions</string>
@@ -14,4 +18,10 @@
     <string name="multiple_contacts_found">Multiple contacts found. Please choose:</string>
     <string name="calling_contact">Calling %1$s...</string>
     <string name="speak_now">Speak now</string>
+    <string name="wake_name_label">Wake Name / Activation Word</string>
+    <string name="wake_name_helper">Say this name hands-free to activate (e.g. Ram, রাম, Sam, Yadu, Madhu)</string>
+    <string name="handsfree_toggle_label">Hands-Free Continuous Activation</string>
+    <string name="handsfree_active">Hands-Free Active</string>
+    <string name="listening_for_wake_name">Listening for \"%1$s\"...</string>
+    <string name="command_listening">Listening for command...</string>
 </resources>

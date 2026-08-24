@@ -246,4 +246,67 @@ object LanguageManager {
             SupportedLanguage.ENGLISH -> "I didn't understand: \"$rawText\". Try saying \"Call John\"."
         }
     }
+
+    /**
+     * Short audible acknowledgement when wake name is recognized and assistant is ready for command.
+     */
+    fun getWakeAcknowledgementMessage(lang: SupportedLanguage): String {
+        return when (lang) {
+            SupportedLanguage.BENGALI -> "হ্যাঁ, বলুন?"
+            SupportedLanguage.HINDI -> "हाँ, बोलिए?"
+            SupportedLanguage.ASSAMESE -> "কওক?"
+            SupportedLanguage.GUJARATI -> "હા, બોલો?"
+            SupportedLanguage.KANNADA -> "ಹೇಳಿ?"
+            SupportedLanguage.MALAYALAM -> "പറയൂ?"
+            SupportedLanguage.MARATHI -> "हो, बोला?"
+            SupportedLanguage.ODIA -> "ହଁ, କୁହନ୍ତୁ?"
+            SupportedLanguage.PUNJABI -> "ਹਾਂਜੀ, ਦੱਸੋ?"
+            SupportedLanguage.TAMIL -> "சொல்லுங்கள்?"
+            SupportedLanguage.TELUGU -> "చెప్పండి?"
+            SupportedLanguage.URDU -> "فرمائیے؟"
+            SupportedLanguage.ENGLISH -> "Yes?"
+        }
+    }
+
+    /**
+     * Idle prompt indicating that hands-free wake listening is armed.
+     */
+    fun getWakeIdlePrompt(wakeName: String, lang: SupportedLanguage): String {
+        return when (lang) {
+            SupportedLanguage.BENGALI -> "\"$wakeName\" বলে ডাকুন বা কথা শুরু করুন"
+            SupportedLanguage.HINDI -> "\"$wakeName\" बोलकर शुरू करें"
+            SupportedLanguage.ASSAMESE -> "\"$wakeName\" বুলি আৰম্ভ কৰক"
+            SupportedLanguage.GUJARATI -> "\"$wakeName\" કહીને શરૂ કરો"
+            SupportedLanguage.KANNADA -> "\"$wakeName\" ಎಂದು ಹೇಳಿ ಪ್ರಾರಂಭಿಸಿ"
+            SupportedLanguage.MALAYALAM -> "\"$wakeName\" എന്ന് പറഞ്ഞു തുടങ്ങൂ"
+            SupportedLanguage.MARATHI -> "\"$wakeName\" बोलून सुरू करा"
+            SupportedLanguage.ODIA -> "\"$wakeName\" କହି ଆରମ୍ଭ କରନ୍ତୁ"
+            SupportedLanguage.PUNJABI -> "\"$wakeName\" ਕਹਿ ਕੇ ਸ਼ੁਰੂ ਕਰੋ"
+            SupportedLanguage.TAMIL -> "\"$wakeName\" என்று கூறி தொடங்கவும்"
+            SupportedLanguage.TELUGU -> "\"$wakeName\" అని చెప్పి ప్రారంభించండి"
+            SupportedLanguage.URDU -> "\"$wakeName\" کہہ کر شروع کریں"
+            SupportedLanguage.ENGLISH -> "Say \"$wakeName\" to activate"
+        }
+    }
+
+    /**
+     * Active command listening prompt after wake name trigger.
+     */
+    fun getListeningForCommandPrompt(lang: SupportedLanguage): String {
+        return when (lang) {
+            SupportedLanguage.BENGALI -> "শুনছি... বলুন কাকে কল করব?"
+            SupportedLanguage.HINDI -> "सुन रहा हूँ... बोलिए किसको कॉल करना है?"
+            SupportedLanguage.ASSAMESE -> "শুনি আছোঁ... কাক কল কৰিব লাগিব?"
+            SupportedLanguage.GUJARATI -> "સાંભળી રહ્યો છું... બોલો કોને કોલ કરવો છે?"
+            SupportedLanguage.KANNADA -> "ಕೇಳಿಸಿಕೊಳ್ಳುತ್ತಿದ್ದೇನೆ... ಯಾರಿಗೆ ಕರೆ ಮಾಡಬೇಕು?"
+            SupportedLanguage.MALAYALAM -> "കേൾക്കുന്നു... ആരെയാണ് വിളിക്കേണ്ടത്?"
+            SupportedLanguage.MARATHI -> "ऐकत आहे... कोणाला कॉल करायचा आहे?"
+            SupportedLanguage.ODIA -> "ଶୁଣୁଛି... କାହାକୁ କଲ୍ କରିବାକୁ ହେବ?"
+            SupportedLanguage.PUNJABI -> "ਸੁਣ ਰਿਹਾ ਹਾਂ... ਦੱਸੋ ਕਿਸਨੂੰ ਕਾਲ ਕਰਨੀ ਹੈ?"
+            SupportedLanguage.TAMIL -> "கேட்கிறேன்... யாருக்கு அழைக்க வேண்டும்?"
+            SupportedLanguage.TELUGU -> "వింటున్నాను... ఎవరికి కాల్ చేయాలి?"
+            SupportedLanguage.URDU -> "سن رہا ہوں... کس کو کال کرنی ہے؟"
+            SupportedLanguage.ENGLISH -> "Listening for command..."
+        }
+    }
 }

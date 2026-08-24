@@ -210,4 +210,185 @@ class VoiceAndMatcherTest {
         val score = BengaliHindiEnglishMatcher.computeMatchScore("রাহুল", "Suresh")
         assertTrue("Expected low score for Rahul vs Suresh, got $score", score < 0.50)
     }
+
+    // ==========================================
+    // 4. 12 Indian Languages Model & Support Tests
+    // ==========================================
+
+    @Test
+    fun testAll12IndianLanguagesDefined() {
+        val languages = SupportedLanguage.ALL_12_INDIAN_LANGUAGES
+        assertEquals(12, languages.size)
+
+        val expectedCodes = listOf(
+            "bn-IN", // 1. Bengali
+            "hi-IN", // 2. Hindi
+            "en-IN", // 3. English (India)
+            "te-IN", // 4. Telugu
+            "mr-IN", // 5. Marathi
+            "ta-IN", // 6. Tamil
+            "gu-IN", // 7. Gujarati
+            "kn-IN", // 8. Kannada
+            "ml-IN", // 9. Malayalam
+            "pa-IN", // 10. Punjabi
+            "or-IN", // 11. Odia
+            "as-IN"  // 12. Assamese
+        )
+
+        assertEquals(expectedCodes, languages.map { it.code })
+
+        // Check native names
+        assertEquals("বাংলা", SupportedLanguage.BENGALI.nativeName)
+        assertEquals("हिंदी", SupportedLanguage.HINDI.nativeName)
+        assertEquals("English", SupportedLanguage.ENGLISH.nativeName)
+        assertEquals("తెలుగు", SupportedLanguage.TELUGU.nativeName)
+        assertEquals("मराठी", SupportedLanguage.MARATHI.nativeName)
+        assertEquals("தமிழ்", SupportedLanguage.TAMIL.nativeName)
+        assertEquals("ગુજરાતી", SupportedLanguage.GUJARATI.nativeName)
+        assertEquals("ಕನ್ನಡ", SupportedLanguage.KANNADA.nativeName)
+        assertEquals("മലയാളം", SupportedLanguage.MALAYALAM.nativeName)
+        assertEquals("ਪੰਜਾਬੀ", SupportedLanguage.PUNJABI.nativeName)
+        assertEquals("ଓଡ଼ିଆ", SupportedLanguage.ODIA.nativeName)
+        assertEquals("অসমীয়া", SupportedLanguage.ASSAMESE.nativeName)
+    }
+
+    @Test
+    fun testLanguageManagerMessagesForAll12Languages() {
+        for (lang in SupportedLanguage.ALL_12_INDIAN_LANGUAGES) {
+            val callingMsg = LanguageManager.getCallingMessage("Rahul", lang)
+            assertTrue("Calling message for ${lang.code} should not be empty", callingMsg.isNotEmpty())
+
+            val noMatchMsg = LanguageManager.getNoMatchMessage("Rahul", lang)
+            assertTrue("No match message for ${lang.code} should not be empty", noMatchMsg.isNotEmpty())
+
+            val noPhoneMsg = LanguageManager.getNoPhoneNumberMessage("Rahul", lang)
+            assertTrue("No phone message for ${lang.code} should not be empty", noPhoneMsg.isNotEmpty())
+
+            val multiMatchMsg = LanguageManager.getMultipleMatchesMessage(lang)
+            assertTrue("Multi match message for ${lang.code} should not be empty", multiMatchMsg.isNotEmpty())
+        }
+    }
+
+    @Test
+    fun testVoiceCommandParserWithPreferredLanguage() {
+        // When Latin text without specific script is provided, preferredLanguage is respected
+        val cmd = VoiceCommandParser.parse("Call Rahul", SupportedLanguage.BENGALI)
+        assertTrue(cmd is ParsedVoiceCommand.CallContact)
+        assertEquals("Rahul", (cmd as ParsedVoiceCommand.CallContact).targetName)
+        assertEquals(SupportedLanguage.BENGALI, cmd.detectedLanguage)
+    }
+
+    // ==========================================
+    // 5. Wake Name & Hands-Free Activation Tests
+    // ==========================================
+
+    @Test
+    fun testWakeNameDetection_BengaliPhrases() {
+        // 1. "রাম, বাবুকে কল করো"
+        val r1 = com.example.manager.WakeNameDetector.checkWakeName("রাম, বাবুকে কল করো", "রাম")
+        assertTrue("Expected wake detected for 'রাম, বাবুকে কল করো'", r1.isWakeWordDetected)
+        assertEquals("বাবুকে কল করো", r1.remainingCommand)
+
+        // 2. "রাম বাবুকে ফোন লাগাও"
+        val r2 = com.example.manager.WakeNameDetector.checkWakeName("রাম বাবুকে ফোন লাগাও", "রাম")
+        assertTrue("Expected wake detected for 'রাম বাবুকে ফোন লাগাও'", r2.isWakeWordDetected)
+        assertEquals("বাবুকে ফোন লাগাও", r2.remainingCommand)
+
+        // 3. "রাম, বাড়িতে ফোন করো"
+        val r3 = com.example.manager.WakeNameDetector.checkWakeName("রাম, বাড়িতে ফোন করো", "রাম")
+        assertTrue("Expected wake detected for 'রাম, বাড়িতে ফোন করো'", r3.isWakeWordDetected)
+        assertEquals("বাড়িতে ফোন করো", r3.remainingCommand)
+
+        // 4. Standalone wake name "রাম"
+        val r4 = com.example.manager.WakeNameDetector.checkWakeName("রাম", "রাম")
+        assertTrue("Expected wake detected for 'রাম'", r4.isWakeWordDetected)
+        assertEquals("", r4.remainingCommand)
+
+        // 5. English wake name "Ram" matching Bengali spoken "রাম, বাবুকে কল করো"
+        val r5 = com.example.manager.WakeNameDetector.checkWakeName("রাম, বাবুকে কল করো", "Ram")
+        assertTrue("Expected cross-script wake detected for configured 'Ram'", r5.isWakeWordDetected)
+        assertEquals("বাবুকে কল করো", r5.remainingCommand)
+
+        // 6. Bengali wake name "স্যাম" (Sam)
+        val r6 = com.example.manager.WakeNameDetector.checkWakeName("স্যাম, রাহুলকে ফোন করো", "স্যাম")
+        assertTrue("Expected wake detected for 'স্যাম, রাহুলকে ফোন করো'", r6.isWakeWordDetected)
+        assertEquals("রাহুলকে ফোন করো", r6.remainingCommand)
+
+        // 7. Bengali wake name "যদু" (Yadu)
+        val r7 = com.example.manager.WakeNameDetector.checkWakeName("যদু বাবাকে কল কর", "যদু")
+        assertTrue("Expected wake detected for 'যদু বাবাকে কল কর'", r7.isWakeWordDetected)
+        assertEquals("বাবাকে কল কর", r7.remainingCommand)
+
+        // 8. Bengali wake name "মধু" (Madhu)
+        val r8 = com.example.manager.WakeNameDetector.checkWakeName("মধু, মাকে ফোন দাও", "মধু")
+        assertTrue("Expected wake detected for 'মধু, মাকে ফোন দাও'", r8.isWakeWordDetected)
+        assertEquals("মাকে ফোন দাও", r8.remainingCommand)
+    }
+
+    @Test
+    fun testWakeNameDetection_HindiPhrases() {
+        // "राम, राहुल को कॉल करो"
+        val r1 = com.example.manager.WakeNameDetector.checkWakeName("राम, राहुल को कॉल करो", "राम")
+        assertTrue("Expected wake detected for 'राम, राहुल को कॉल करो'", r1.isWakeWordDetected)
+        assertEquals("राहुल को कॉल करो", r1.remainingCommand)
+
+        // "हे राम विनोद को फोन लगाओ"
+        val r2 = com.example.manager.WakeNameDetector.checkWakeName("हे राम विनोद को फोन लगाओ", "Ram")
+        assertTrue("Expected wake detected for 'हे राम विनोद को फोन लगाओ'", r2.isWakeWordDetected)
+        assertEquals("विनोद को फोन लगाओ", r2.remainingCommand)
+    }
+
+    @Test
+    fun testWakeNameDetection_EnglishPhrases() {
+        // "Hey Ram, call Vinod"
+        val r1 = com.example.manager.WakeNameDetector.checkWakeName("Hey Ram, call Vinod", "Ram")
+        assertTrue(r1.isWakeWordDetected)
+        assertEquals("call Vinod", r1.remainingCommand)
+
+        // "VirJoy, please call mom"
+        val r2 = com.example.manager.WakeNameDetector.checkWakeName("VirJoy, please call mom", "VirJoy")
+        assertTrue(r2.isWakeWordDetected)
+        assertEquals("please call mom", r2.remainingCommand)
+
+        // "Sam call Dad"
+        val r3 = com.example.manager.WakeNameDetector.checkWakeName("Sam call Dad", "Sam")
+        assertTrue(r3.isWakeWordDetected)
+        assertEquals("call Dad", r3.remainingCommand)
+    }
+
+    @Test
+    fun testWakeNameDetection_NormalConversationIgnored() {
+        // Normal conversation phrases that do NOT contain the configured wake name must NOT trigger activation
+        val nonTriggers = listOf(
+            "আজকে আবহাওয়া কেমন?",
+            "বাবুকে কল করো",
+            "কালকে বাড়ি যাব",
+            "आज का मौसम कैसा है",
+            "How are you doing today?",
+            "What is the time right now?"
+        )
+
+        for (phrase in nonTriggers) {
+            val result = com.example.manager.WakeNameDetector.checkWakeName(phrase, "রাম")
+            org.junit.Assert.assertFalse(
+                "Phrase '$phrase' should NOT activate when wake name is 'রাম'",
+                result.isWakeWordDetected
+            )
+        }
+    }
+
+    @Test
+    fun testWakeAcknowledgementAndPromptsForAll12Languages() {
+        for (lang in SupportedLanguage.ALL_12_INDIAN_LANGUAGES) {
+            val ack = LanguageManager.getWakeAcknowledgementMessage(lang)
+            assertTrue("Acknowledgement message for ${lang.code} should not be empty", ack.isNotEmpty())
+
+            val idlePrompt = LanguageManager.getWakeIdlePrompt("রাম", lang)
+            assertTrue("Idle prompt for ${lang.code} should not be empty", idlePrompt.isNotEmpty())
+            assertTrue("Idle prompt for ${lang.code} should contain wake name", idlePrompt.contains("রাম"))
+
+            val commandPrompt = LanguageManager.getListeningForCommandPrompt(lang)
+            assertTrue("Command prompt for ${lang.code} should not be empty", commandPrompt.isNotEmpty())
+        }
+    }
 }

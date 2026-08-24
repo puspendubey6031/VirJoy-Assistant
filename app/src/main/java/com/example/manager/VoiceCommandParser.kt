@@ -21,9 +21,14 @@ object VoiceCommandParser {
     /**
      * Parses recognized speech text into structured command and identifies user's language.
      */
-    fun parse(rawText: String): ParsedVoiceCommand {
+    fun parse(rawText: String, preferredLanguage: SupportedLanguage = SupportedLanguage.ENGLISH): ParsedVoiceCommand {
         val trimmed = rawText.trim()
-        val detectedLanguage = LanguageManager.detectLanguage(trimmed)
+        val detectedFromScript = LanguageManager.detectLanguage(trimmed)
+        val detectedLanguage = if (detectedFromScript == SupportedLanguage.ENGLISH && preferredLanguage != SupportedLanguage.ENGLISH) {
+            preferredLanguage
+        } else {
+            detectedFromScript
+        }
 
         if (trimmed.isEmpty()) {
             return ParsedVoiceCommand.Unknown(rawText, detectedLanguage)
