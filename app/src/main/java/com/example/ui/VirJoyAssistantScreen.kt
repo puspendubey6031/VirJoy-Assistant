@@ -84,6 +84,16 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.Schedule
+import com.example.model.AssistantAvailabilityMode
 import com.example.model.AssistantListeningMode
 import com.example.model.Contact
 import com.example.model.PhoneNumberOption
@@ -102,11 +112,15 @@ fun VirJoyAssistantScreen(
     val context = LocalContext.current
 
     val requiredPermissions = remember {
-        arrayOf(
+        val perms = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.READ_CONTACTS,
             Manifest.permission.CALL_PHONE
         )
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        perms.toTypedArray()
     }
 
     val permissionsLauncher = rememberLauncherForActivityResult(
@@ -183,9 +197,25 @@ fun VirJoyAssistantScreen(
                     currentVoice = uiState.voiceGender,
                     currentLanguage = uiState.selectedLanguage,
                     isHandsFree = uiState.isHandsFreeEnabled,
+                    currentAvailabilityMode = uiState.availabilityMode,
+                    currentStartHour = uiState.scheduleStartHour,
+                    currentStartMinute = uiState.scheduleStartMinute,
+                    currentEndHour = uiState.scheduleEndHour,
+                    currentEndMinute = uiState.scheduleEndMinute,
                     onDismiss = { viewModel.closeSettings() },
-                    onSave = { name, wakeName, voice, lang, handsFree ->
-                        viewModel.saveSettings(name, wakeName, voice, lang, handsFree)
+                    onSaveFull = { name, wakeName, voice, lang, handsFree, mode, startH, startM, endH, endM ->
+                        viewModel.saveSettings(
+                            name = name,
+                            wakeName = wakeName,
+                            voiceGender = voice,
+                            language = lang,
+                            isHandsFree = handsFree,
+                            availabilityMode = mode,
+                            scheduleStartHour = startH,
+                            scheduleStartMinute = startM,
+                            scheduleEndHour = endH,
+                            scheduleEndMinute = endM
+                        )
                     }
                 )
             }
@@ -216,7 +246,8 @@ private fun AssistantContent(
                 listeningMode = uiState.listeningMode,
                 isListening = uiState.isListening,
                 wakeName = uiState.wakeName,
-                isHandsFree = uiState.isHandsFreeEnabled
+                isHandsFree = uiState.isHandsFreeEnabled,
+                availabilityMode = uiState.availabilityMode
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -340,36 +371,41 @@ private fun StatusBadge(
     listeningMode: AssistantListeningMode,
     isListening: Boolean,
     wakeName: String,
-    isHandsFree: Boolean
+    isHandsFree: Boolean,
+    availabilityMode: AssistantAvailabilityMode = AssistantAvailabilityMode.ACTIVE
 ) {
-    val backgroundColor = when (listeningMode) {
-        AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.errorContainer
-        AssistantListeningMode.DISAMBIGUATION_LISTENING -> MaterialTheme.colorScheme.tertiaryContainer
-        AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.secondaryContainer
-        AssistantListeningMode.INACTIVE -> MaterialTheme.colorScheme.surfaceVariant
+    val backgroundColor = when {
+        availabilityMode == AssistantAvailabilityMode.SLEEP -> MaterialTheme.colorScheme.surfaceVariant
+        listeningMode == AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.errorContainer
+        listeningMode == AssistantListeningMode.DISAMBIGUATION_LISTENING -> MaterialTheme.colorScheme.tertiaryContainer
+        listeningMode == AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
     }
 
-    val contentColor = when (listeningMode) {
-        AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.onErrorContainer
-        AssistantListeningMode.DISAMBIGUATION_LISTENING -> MaterialTheme.colorScheme.onTertiaryContainer
-        AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.onSecondaryContainer
-        AssistantListeningMode.INACTIVE -> MaterialTheme.colorScheme.onSurfaceVariant
+    val contentColor = when {
+        availabilityMode == AssistantAvailabilityMode.SLEEP -> MaterialTheme.colorScheme.onSurfaceVariant
+        listeningMode == AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.onErrorContainer
+        listeningMode == AssistantListeningMode.DISAMBIGUATION_LISTENING -> MaterialTheme.colorScheme.onTertiaryContainer
+        listeningMode == AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    val text = when (listeningMode) {
-        AssistantListeningMode.COMMAND_LISTENING -> "Listening for command..."
-        AssistantListeningMode.DISAMBIGUATION_LISTENING -> "Listening: Choose number / option..."
-        AssistantListeningMode.WAKE_LISTENING -> {
-            if (isHandsFree) "Hands-Free: Listening for \"$wakeName\"" else "Tap Mic to speak"
+    val text = when {
+        availabilityMode == AssistantAvailabilityMode.SLEEP -> "Sleeping (Passive listening paused)"
+        listeningMode == AssistantListeningMode.COMMAND_LISTENING -> "Listening for command..."
+        listeningMode == AssistantListeningMode.DISAMBIGUATION_LISTENING -> "Listening: Choose number / option..."
+        listeningMode == AssistantListeningMode.WAKE_LISTENING -> {
+            if (isHandsFree) "Hands-Free: Listening for \"$wakeName\" (${availabilityMode.displayName})" else "Tap Mic to speak"
         }
-        AssistantListeningMode.INACTIVE -> "Paused / Permissions Required"
+        else -> "Paused / Permissions Required"
     }
 
-    val dotColor = when (listeningMode) {
-        AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.error
-        AssistantListeningMode.DISAMBIGUATION_LISTENING -> MaterialTheme.colorScheme.tertiary
-        AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.primary
-        AssistantListeningMode.INACTIVE -> MaterialTheme.colorScheme.outline
+    val dotColor = when {
+        availabilityMode == AssistantAvailabilityMode.SLEEP -> MaterialTheme.colorScheme.outline
+        listeningMode == AssistantListeningMode.COMMAND_LISTENING -> MaterialTheme.colorScheme.error
+        listeningMode == AssistantListeningMode.DISAMBIGUATION_LISTENING -> MaterialTheme.colorScheme.tertiary
+        listeningMode == AssistantListeningMode.WAKE_LISTENING -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.outline
     }
 
     Surface(
@@ -696,14 +732,36 @@ fun SettingsDialog(
     currentVoice: VoiceGender = VoiceGender.FEMALE,
     currentLanguage: SupportedLanguage = SupportedLanguage.ENGLISH,
     isHandsFree: Boolean = true,
+    currentAvailabilityMode: AssistantAvailabilityMode = AssistantAvailabilityMode.ACTIVE,
+    currentStartHour: Int = 8,
+    currentStartMinute: Int = 0,
+    currentEndHour: Int = 22,
+    currentEndMinute: Int = 0,
     onDismiss: () -> Unit,
-    onSave: (name: String, wakeName: String, voice: VoiceGender, language: SupportedLanguage, handsFree: Boolean) -> Unit
+    onSaveFull: (
+        name: String,
+        wakeName: String,
+        voice: VoiceGender,
+        language: SupportedLanguage,
+        handsFree: Boolean,
+        mode: AssistantAvailabilityMode,
+        startHour: Int,
+        startMinute: Int,
+        endHour: Int,
+        endMinute: Int
+    ) -> Unit
 ) {
+    val context = LocalContext.current
     var nameState by remember { mutableStateOf(currentName) }
     var wakeNameState by remember { mutableStateOf(currentWakeName) }
     var voiceState by remember { mutableStateOf(currentVoice) }
     var languageState by remember { mutableStateOf(currentLanguage) }
     var handsFreeState by remember { mutableStateOf(isHandsFree) }
+    var availabilityModeState by remember { mutableStateOf(currentAvailabilityMode) }
+    var startHourState by remember { mutableStateOf(currentStartHour) }
+    var startMinuteState by remember { mutableStateOf(currentStartMinute) }
+    var endHourState by remember { mutableStateOf(currentEndHour) }
+    var endMinuteState by remember { mutableStateOf(currentEndMinute) }
     var isLanguageDropdownExpanded by remember { mutableStateOf(false) }
 
     Dialog(
@@ -713,7 +771,7 @@ fun SettingsDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
-                .heightIn(max = 600.dp)
+                .heightIn(max = 680.dp)
                 .padding(vertical = 16.dp),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(
@@ -785,6 +843,196 @@ fun SettingsDialog(
                         onCheckedChange = { handsFreeState = it },
                         modifier = Modifier.testTag("handsfree_switch")
                     )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Assistant Availability (Active, Sleep, Scheduled, 24 Hours)
+                Text(
+                    text = stringResource(R.string.assistant_availability_title),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AssistantAvailabilityMode.values().forEach { mode ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { availabilityModeState = mode }
+                                .padding(vertical = 4.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = availabilityModeState == mode,
+                                onClick = { availabilityModeState = mode },
+                                modifier = Modifier.testTag("availability_${mode.name.lowercase()}")
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = mode.displayName,
+                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    text = mode.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    // If Scheduled is selected, show time range picker
+                    AnimatedVisibility(visible = availabilityModeState == AssistantAvailabilityMode.SCHEDULED) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Scheduled Hours (24h format)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = stringResource(R.string.schedule_start_time),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        TimeNumberSelector(
+                                            value = startHourState,
+                                            onValueChange = { startHourState = it.coerceIn(0, 23) },
+                                            range = 0..23,
+                                            label = "H"
+                                        )
+                                        Text(":")
+                                        TimeNumberSelector(
+                                            value = startMinuteState,
+                                            onValueChange = { startMinuteState = it.coerceIn(0, 59) },
+                                            range = 0..59,
+                                            label = "M"
+                                        )
+                                    }
+                                }
+
+                                Column {
+                                    Text(
+                                        text = stringResource(R.string.schedule_end_time),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        TimeNumberSelector(
+                                            value = endHourState,
+                                            onValueChange = { endHourState = it.coerceIn(0, 23) },
+                                            range = 0..23,
+                                            label = "H"
+                                        )
+                                        Text(":")
+                                        TimeNumberSelector(
+                                            value = endMinuteState,
+                                            onValueChange = { endMinuteState = it.coerceIn(0, 59) },
+                                            range = 0..59,
+                                            label = "M"
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Battery Optimization Notice
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.BatteryChargingFull,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(R.string.battery_optimization_title),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.battery_optimization_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(
+                            onClick = {
+                                try {
+                                    val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    val appIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                        data = Uri.fromParts("package", context.packageName, null)
+                                    }
+                                    context.startActivity(appIntent)
+                                }
+                            },
+                            modifier = Modifier.testTag("battery_settings_button")
+                        ) {
+                            Text(stringResource(R.string.battery_optimization_action))
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -939,7 +1187,20 @@ fun SettingsDialog(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = { onSave(nameState, wakeNameState, voiceState, languageState, handsFreeState) },
+                        onClick = {
+                            onSaveFull(
+                                nameState,
+                                wakeNameState,
+                                voiceState,
+                                languageState,
+                                handsFreeState,
+                                availabilityModeState,
+                                startHourState,
+                                startMinuteState,
+                                endHourState,
+                                endMinuteState
+                            )
+                        },
                         modifier = Modifier.testTag("save_settings_button")
                     ) {
                         Text(stringResource(R.string.save_button))
@@ -948,6 +1209,79 @@ fun SettingsDialog(
             }
         }
     }
+}
+
+@Composable
+private fun TimeNumberSelector(
+    value: Int,
+    onValueChange: (Int) -> Unit,
+    range: IntRange,
+    label: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = String.format("%02d", value),
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Column {
+            Text(
+                text = "▲",
+                modifier = Modifier
+                    .clickable {
+                        val next = if (value + 1 > range.last) range.first else value + 1
+                        onValueChange(next)
+                    }
+                    .padding(horizontal = 2.dp),
+                style = MaterialTheme.typography.labelSmall
+            )
+            Text(
+                text = "▼",
+                modifier = Modifier
+                    .clickable {
+                        val prev = if (value - 1 < range.first) range.last else value - 1
+                        onValueChange(prev)
+                    }
+                    .padding(horizontal = 2.dp),
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
+    }
+}
+
+@Composable
+fun SettingsDialog(
+    currentName: String,
+    currentWakeName: String = "VirJoy",
+    currentVoice: VoiceGender = VoiceGender.FEMALE,
+    currentLanguage: SupportedLanguage = SupportedLanguage.ENGLISH,
+    isHandsFree: Boolean = true,
+    onDismiss: () -> Unit,
+    onSave: (name: String, wakeName: String, voice: VoiceGender, language: SupportedLanguage, handsFree: Boolean) -> Unit
+) {
+    SettingsDialog(
+        currentName = currentName,
+        currentWakeName = currentWakeName,
+        currentVoice = currentVoice,
+        currentLanguage = currentLanguage,
+        isHandsFree = isHandsFree,
+        currentAvailabilityMode = AssistantAvailabilityMode.ACTIVE,
+        currentStartHour = 8,
+        currentStartMinute = 0,
+        currentEndHour = 22,
+        currentEndMinute = 0,
+        onDismiss = onDismiss,
+        onSaveFull = { name, wakeName, voice, lang, handsFree, _, _, _, _, _ ->
+            onSave(name, wakeName, voice, lang, handsFree)
+        }
+    )
 }
 
 @Composable

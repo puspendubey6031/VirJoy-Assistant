@@ -8,18 +8,46 @@ import com.example.model.Contact
 import com.example.model.ContactMatchResult
 import com.example.model.PhoneNumberOption
 
-class ContactManager(private val context: Context) {
+class ContactManager(private val context: Context? = null) {
 
     companion object {
         private const val TAG = "ContactManager"
         private const val MATCH_THRESHOLD = 0.70
+
+        /**
+         * Normalizes a phone number to a canonical digit representation for accurate deduplication.
+         * Strips non-digits and removes international prefix (e.g. +91, 91, leading 0) for 10-digit Indian numbers.
+         */
+        fun normalizePhoneNumber(rawNumber: String): String {
+            val digitsOnly = rawNumber.replace(Regex("[^0-9]"), "")
+            return when {
+                digitsOnly.length == 12 && digitsOnly.startsWith("91") -> digitsOnly.substring(2)
+                digitsOnly.length == 11 && digitsOnly.startsWith("0") -> digitsOnly.substring(1)
+                digitsOnly.length >= 10 -> digitsOnly.takeLast(10)
+                else -> digitsOnly
+            }
+        }
+
+        /**
+         * Masks phone number for safe privacy-compliant logging (e.g. "***3210").
+         */
+        fun maskPhoneNumber(number: String): String {
+            val clean = number.replace(Regex("[^0-9+]"), "")
+            return if (clean.length >= 4) {
+                "***" + clean.takeLast(4)
+            } else {
+                "***"
+            }
+        }
     }
 
     /**
      * Reads all real contacts from the device's ContactsContract database.
+     * Deduplicates identical numbers within each contact.
      */
     fun getAllContacts(): List<Contact> {
         val contactsMap = mutableMapOf<String, Triple<String, MutableList<String>, MutableList<PhoneNumberOption>>>()
+        val seenCanonicalPerContact = mutableMapOf<String, MutableSet<String>>()
 
         val projection = arrayOf(
             ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
@@ -30,7 +58,7 @@ class ContactManager(private val context: Context) {
         )
 
         try {
-            val cursor: Cursor? = context.contentResolver.query(
+            val cursor: Cursor? = context?.contentResolver?.query(
                 ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
                 projection,
                 null,
@@ -54,9 +82,14 @@ class ContactManager(private val context: Context) {
 
                     if (id.isNotEmpty() && name.isNotEmpty() && number.isNotEmpty()) {
                         val cleanNumber = number.replace(Regex("[^0-9+]"), "")
-                        val entry = contactsMap.getOrPut(id) { Triple(name, mutableListOf(), mutableListOf()) }
-                        if (!entry.second.contains(cleanNumber)) {
+                        val canonical = normalizePhoneNumber(cleanNumber)
+
+                        val seenSet = seenCanonicalPerContact.getOrPut(id) { mutableSetOf() }
+                        if (canonical.isNotEmpty() && !seenSet.contains(canonical)) {
+                            seenSet.add(canonical)
+                            val entry = contactsMap.getOrPut(id) { Triple(name, mutableListOf(), mutableListOf()) }
                             entry.second.add(cleanNumber)
+
                             val typeLabel = try {
                                 ContactsContract.CommonDataKinds.Phone.getTypeLabel(
                                     context.resources,
@@ -103,7 +136,7 @@ class ContactManager(private val context: Context) {
     }
 
     /**
-     * Searches for contacts matching the given name query using Bengali, Hindi, and English matching.
+     * Searches for contacts matching the given name query using phonetic matching.
      */
     fun searchContacts(name: String): List<Contact> {
         val cleanQuery = BengaliHindiEnglishMatcher.cleanContactQuery(name)
@@ -124,18 +157,26 @@ class ContactManager(private val context: Context) {
 
     /**
      * Finds the best contact match for a given name query.
-     * Returns:
-     * - SingleMatch if exactly one contact matches and has 1 number
-     * - DisambiguationRequired if contact has multiple phone numbers
-     * - MultipleMatches if multiple contacts match with close scores
-     * - NoMatch if no contact reaches threshold
+     * Evaluates whether a single contact was matched or multiple distinct contacts were found.
+     * Logs structured resolution details for debugging on real devices.
      */
-    fun findBestContactMatch(name: String): ContactMatchResult {
-        val cleanQuery = BengaliHindiEnglishMatcher.cleanContactQuery(name)
-        if (cleanQuery.isBlank()) return ContactMatchResult.NoMatch
+    fun findBestContactMatch(name: String, rawCommand: String = ""): ContactMatchResult {
+        return findBestContactMatch(name, getAllContacts(), rawCommand)
+    }
 
-        val allContacts: List<Contact> = getAllContacts()
-        if (allContacts.isEmpty()) return ContactMatchResult.NoMatch
+    /**
+     * Resolves contact matching against a provided list of contacts.
+     */
+    fun findBestContactMatch(
+        name: String,
+        allContacts: List<Contact>,
+        rawCommand: String = ""
+    ): ContactMatchResult {
+        val cleanQuery = BengaliHindiEnglishMatcher.cleanContactQuery(name)
+        if (cleanQuery.isBlank() || allContacts.isEmpty()) {
+            Log.d(TAG, "[ContactResolver] Command='$rawCommand', Query='$cleanQuery', Result=NoMatch (empty query or contacts)")
+            return ContactMatchResult.NoMatch
+        }
 
         val scoredList: List<Pair<Contact, Double>> = allContacts.map { contact: Contact ->
             val score: Double = BengaliHindiEnglishMatcher.computeMatchScore(cleanQuery, contact.name)
@@ -144,28 +185,66 @@ class ContactManager(private val context: Context) {
             .sortedByDescending { it.second }
 
         if (scoredList.isEmpty()) {
+            Log.d(TAG, "[ContactResolver] Command='$rawCommand', Query='$cleanQuery', Result=NoMatch (no matches above $MATCH_THRESHOLD)")
             return ContactMatchResult.NoMatch
         }
 
         val topScore: Double = scoredList.first().second
+        val topCandidate: Contact = scoredList.first().first
 
-        // Check if there are exact or near-identical top scores
-        val topMatches: List<Pair<Contact, Double>> = scoredList.filter {
-            it.second >= (topScore - 0.05) && it.second >= MATCH_THRESHOLD
-        }
+        // Determine if top candidate is an unambiguous single winner:
+        // 1) Only one contact reached threshold
+        // 2) Top candidate is an exact match (score >= 0.98) and clearly better than #2
+        // 3) Significant score gap (>= 0.12) over the second candidate
+        val isClearSingleWinner = scoredList.size == 1 ||
+                (topScore >= 0.98 && (scoredList.size == 1 || scoredList[1].second < 0.98)) ||
+                (topScore - (scoredList.getOrNull(1)?.second ?: 0.0) >= 0.12)
 
-        return if (topMatches.size == 1) {
-            val contact: Contact = topMatches.first().first
-            if (contact.labeledPhoneNumbers.size > 1) {
-                ContactMatchResult.DisambiguationRequired(contact.name, contact.labeledPhoneNumbers)
-            } else {
-                val phone: String = contact.primaryPhoneNumber
+        if (isClearSingleWinner) {
+            val contact = topCandidate
+            val dedupedNumbers = contact.labeledPhoneNumbers
+            val maskedNumbers = dedupedNumbers.map { "${it.label}: ***${it.lastFourDigits}" }
+
+            return if (dedupedNumbers.size <= 1) {
+                val phone = contact.primaryPhoneNumber
+                Log.d(
+                    TAG,
+                    "[ContactResolver] SINGLE MATCH -> Contact='${contact.name}' (ID=${contact.id}), PhoneCount=${dedupedNumbers.size}, Phone=${maskPhoneNumber(phone)}, Disambiguation=NO"
+                )
                 ContactMatchResult.SingleMatch(contact, phone)
+            } else {
+                val limitedOptions = dedupedNumbers.take(3)
+                Log.d(
+                    TAG,
+                    "[ContactResolver] MULTI-NUMBER FOR SINGLE CONTACT -> Contact='${contact.name}' (ID=${contact.id}), UniqueNumbers=${dedupedNumbers.size}, Options=${maskedNumbers.take(3)}, Disambiguation=YES"
+                )
+                ContactMatchResult.DisambiguationRequired(contact.name, limitedOptions)
             }
-        } else {
-            // Multiple contacts found - also create options for them
-            ContactMatchResult.MultipleMatches(topMatches.map { it.first })
         }
+
+        // Multiple distinct contacts with close top scores
+        val tiedMatches = scoredList.filter { it.second >= (topScore - 0.05) && it.second >= MATCH_THRESHOLD }
+            .map { it.first }
+            .distinctBy { it.id }
+            .take(3)
+
+        if (tiedMatches.size == 1) {
+            val singleContact = tiedMatches.first()
+            return if (singleContact.labeledPhoneNumbers.size <= 1) {
+                ContactMatchResult.SingleMatch(singleContact, singleContact.primaryPhoneNumber)
+            } else {
+                ContactMatchResult.DisambiguationRequired(singleContact.name, singleContact.labeledPhoneNumbers.take(3))
+            }
+        }
+
+        val contactsSummary = tiedMatches.map { c ->
+            "${c.name} (ID=${c.id}, PhoneCount=${c.phoneNumbers.size}, Last4=***${c.primaryPhoneNumber.takeLast(4)})"
+        }
+        Log.d(
+            TAG,
+            "[ContactResolver] MULTIPLE DISTINCT CONTACTS -> Query='$cleanQuery', MatchesCount=${tiedMatches.size}, Contacts=$contactsSummary, Disambiguation=YES"
+        )
+        return ContactMatchResult.MultipleMatches(tiedMatches)
     }
 
     /**

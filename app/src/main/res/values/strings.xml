@@ -24,4 +24,23 @@
     <string name="handsfree_active">Hands-Free Active</string>
     <string name="listening_for_wake_name">Listening for \"%1$s\"...</string>
     <string name="command_listening">Listening for command...</string>
+    <string name="availability_title">Assistant Availability</string>
+    <string name="assistant_availability_title">Assistant Availability</string>
+    <string name="mode_active">Active</string>
+    <string name="mode_active_desc">Background wake listening remains active</string>
+    <string name="mode_sleep">Sleep</string>
+    <string name="mode_sleep_desc">Completely stop passive wake listening</string>
+    <string name="mode_scheduled">Scheduled</string>
+    <string name="mode_scheduled_desc">Active only during scheduled hours</string>
+    <string name="mode_24hours">24 Hours</string>
+    <string name="mode_24hours_desc">Active continuously 24/7</string>
+    <string name="schedule_start_time">Start Time</string>
+    <string name="schedule_end_time">End Time</string>
+    <string name="battery_opt_title">Battery Optimization</string>
+    <string name="battery_optimization_title">Battery Optimization</string>
+    <string name="battery_opt_desc">To ensure the assistant is never interrupted when the screen is off or in pocket, set battery usage to Unrestricted in Android settings.</string>
+    <string name="battery_optimization_desc">To ensure the assistant is never interrupted when the screen is off or in pocket, set battery usage to Unrestricted in Android settings.</string>
+    <string name="battery_opt_button">Battery Settings</string>
+    <string name="battery_optimization_action">Battery Settings</string>
+    <string name="notification_service_title">VirJoy Assistant is active</string>
 </resources>

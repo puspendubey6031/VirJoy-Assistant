@@ -1,5 +1,6 @@
 package com.example.manager
 
+import com.example.model.Contact
 import com.example.model.PhoneNumberOption
 import com.example.model.SupportedLanguage
 import java.util.Locale
@@ -13,6 +14,7 @@ object LanguageManager {
     fun detectLanguage(text: String): SupportedLanguage {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return SupportedLanguage.ENGLISH
+        val lower = trimmed.lowercase(Locale.ROOT)
 
         var bengaliCount = 0
         var devanagariCount = 0
@@ -64,8 +66,7 @@ object LanguageManager {
                     trimmed.contains("कीजिए") || trimmed.contains("लगाओ") || trimmed.contains("मिलाओ")
 
             if (!hasHindiMarkers) {
-                // Check for Marathi-specific markers (करा, लावा, यांना, संपर्क, or Marathi suffix ला)
-                if (trimmed.contains("करा") || trimmed.contains("लावा") ||
+                 if (trimmed.contains("करा") || trimmed.contains("लावा") ||
                     trimmed.contains("यांना") || trimmed.contains("संपर्क") || Regex("\\S+ला\\b").containsMatchIn(trimmed)) {
                     return SupportedLanguage.MARATHI
                 }
@@ -82,8 +83,6 @@ object LanguageManager {
         if (malayalamCount > 0) return SupportedLanguage.MALAYALAM
         if (arabicCount > 0) return SupportedLanguage.URDU
 
-        // For Latin text, detect romanized Indian phrases (Hinglish / Benglish etc.)
-        val lower = trimmed.lowercase(Locale.ROOT)
         if (lower.contains("koro") || lower.contains("koro na") || lower.contains("daao") || lower.contains("phone koro")) {
             return SupportedLanguage.BENGALI
         }
@@ -92,6 +91,72 @@ object LanguageManager {
         }
 
         return SupportedLanguage.ENGLISH
+    }
+
+    /**
+     * Checks whether a recognized voice utterance is an immediate stop or cancellation command.
+     */
+    fun isCancelOrStopPhrase(text: String): Boolean {
+        val trimmed = text.trim().lowercase(Locale.ROOT)
+        if (trimmed.isEmpty()) return false
+
+        val cancelTokens = listOf(
+            // English & Romanized Indian expressions
+            "stop", "cancel", "shut up", "hush", "quit", "halt", "reset", "abort", "nevermind", "never mind", "silence", "be quiet", "close", "end call", "hang up",
+            "thamo", "tham", "ruko", "roko", "ruk jao", "band koro", "band karo", "chup", "chup karo", "chup koro", "chup raho", "bas", "khatam",
+            // Bengali & common variants
+            "থামো", "থাম", "বন্ধ করো", "বন্ধ কর", "চুপ করো", "চুপ কর", "স্টপ করো", "স্টপ কর", "স্টপ", "রিসেট", "বাদ দাও", "ব্যাস", "থেমে যাও", "বাতিল", "বাতিল করো", "থাক", "রুকো", "রোকো", "রুক যাও", "ক্যান্সেল", "ক্যানসেল",
+            // Hindi & common variants
+            "रुको", "रुक जाओ", "रुक", "रोक", "रोको", "बंद करो", "बंद कर", "बंद", "चुप करो", "चुप रहो", "चुप", "स्टॉप", "कैंसिल", "कैनसिल", "बस", "रद्द करो", "रहने दो", "खत्म",
+            // Assamese
+            "থামক", "বন্ধ কৰক", "চুপ থাকক", "বাতিল কৰক", "ষ্টপ", "থাকক", "ৰোকক",
+            // Gujarati
+            "રોકો", "બંધ કરો", "શાંત રહો", "રદ કરો", "સ્ટોપ", "બસ",
+            // Marathi
+            "थांबा", "बंद करा", "शांत राहा", "रद्द करा", "स्टॉप", "बस",
+            // Punjabi
+            "ਰੋਕੋ", "ਬੰਦ ਕਰੋ", "ਚੁੱਪ ਕਰੋ", "ਰੱਦ ਕਰੋ", "ਸਟਾਪ", "ਬੱਸ",
+            // Odia
+            "ରୁହନ୍ତୁ", "ବନ୍ଦ କରନ୍ତୁ", "ଚୁପ୍ ରୁହନ୍ତୁ", "ବାତିଲ କରନ୍ତୁ", "ଷ୍ଟପ୍",
+            // Tamil
+            "நிறுத்து", "நிறுத்துங்கள்", "மூடு", "அமைதியாக இரு", "ரத்து செய்", "ஸ்டாப்",
+            // Telugu
+            "ఆపు", "ఆపండి", "మూయి", "రద్దు చేయి", "స్టాప్",
+            // Kannada
+            "ನಿಲ್ಲಿಸಿ", "ನಿಲ್ಲಿಸು", "ಮುಚ್ಚು", "ರದ್ದುಮಾಡು", "ಸ್ಟಾಪ್",
+            // Malayalam
+            "നിർത്തൂ", "നിർത്തുക", "മിണ്ടാതിരിക്കൂ", "റദ്ദാക്കുക", "സ്റ്റോപ്പ്",
+            // Urdu
+            "روکو", "بند کرو", "خاموش", "منسوخ کریں", "سٹاپ"
+        )
+
+        for (token in cancelTokens) {
+            if (trimmed == token || trimmed.contains(token)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Spoken message when an ongoing operation or voice flow is cancelled.
+     */
+    fun getCancelledMessage(lang: SupportedLanguage): String {
+        return when (lang) {
+            SupportedLanguage.BENGALI -> "বাতিল করা হয়েছে।"
+            SupportedLanguage.HINDI -> "रद्द कर दिया गया।"
+            SupportedLanguage.ASSAMESE -> "বাতিল কৰা হৈছে।"
+            SupportedLanguage.GUJARATI -> "રદ કરવામાં આવ્યું છે."
+            SupportedLanguage.KANNADA -> "ರದ್ದುಮಾಡಲಾಗಿದೆ."
+            SupportedLanguage.MALAYALAM -> "റദ്ദാക്കി."
+            SupportedLanguage.MARATHI -> "रद्द केले आहे."
+            SupportedLanguage.ODIA -> "ବାତିଲ କରାଗଲା।"
+            SupportedLanguage.PUNJABI -> "ਰੱਦ ਕਰ ਦਿੱਤਾ ਗਿਆ।"
+            SupportedLanguage.TAMIL -> "ரத்து செய்யப்பட்டது."
+            SupportedLanguage.TELUGU -> "రద్దు చేయబడింది."
+            SupportedLanguage.URDU -> "منسوخ کر دیا گیا۔"
+            SupportedLanguage.ENGLISH -> "Cancelled."
+        }
     }
 
     /**
@@ -137,27 +202,6 @@ object LanguageManager {
     }
 
     /**
-     * Formats disambiguation prompt when multiple matches are found.
-     */
-    fun getMultipleMatchesMessage(lang: SupportedLanguage): String {
-        return when (lang) {
-            SupportedLanguage.BENGALI -> "একাধিক পরিচিতি পাওয়া গেছে। অনুগ্রহ করে একটি বেছে নিন:"
-            SupportedLanguage.HINDI -> "एक से अधिक संपर्क मिले। कृपया एक चुनें:"
-            SupportedLanguage.ASSAMESE -> "একাধিক যোগাযোগ পোৱা গৈছে। অনুগ্ৰহ কৰি এটা বাছক:"
-            SupportedLanguage.GUJARATI -> "એક કરતાં વધુ સંપર્કો મળ્યા. કૃપા કરીને એક પસંદ કરો:"
-            SupportedLanguage.KANNADA -> "ಬಹು ಸಂಪರ್ಕಗಳು ಕಂಡುಬಂದಿವೆ. ದಯವಿಟ್ಟು ಒಂದನ್ನು ಆಯ್ಕೆಮಾಡಿ:"
-            SupportedLanguage.MALAYALAM -> "ഒന്നിലധികം കോൺടാക്റ്റുകൾ കണ്ടെത്തി. ദയവായി ഒന്ന് തിരഞ്ഞെടുക്കുക:"
-            SupportedLanguage.MARATHI -> "एकापेक्षा जास्त संपर्क सापडले. कृपया एक निवडा:"
-            SupportedLanguage.ODIA -> "ଏକାଧିକ ସମ୍ପର୍କ ମିଳିଲା। ଦୟାକରି ଗୋଟିଏ ବାଛନ୍ତୁ:"
-            SupportedLanguage.PUNJABI -> "ਇੱਕ ਤੋਂ ਵੱਧ ਸੰਪਰਕ ਮਿਲੇ। ਕਿਰਪਾ ਕਰਕੇ ਇੱਕ ਚੁਣੋ:"
-            SupportedLanguage.TAMIL -> "பல தொடர்புகள் கிடைத்துள்ளன. ஒன்றைத் தேர்ந்தெடுக்கவும்:"
-            SupportedLanguage.TELUGU -> "బహుళ పరిచయాలు కనుగొనబడ్డాయి. దయచేసి ఒకదాన్ని ఎంచుకోండి:"
-            SupportedLanguage.URDU -> "ایک سے زیادہ رابطے ملے۔ براہ کرم ایک منتخب کریں:"
-            SupportedLanguage.ENGLISH -> "Multiple contacts found. Please choose:"
-        }
-    }
-
-    /**
      * Formats response when a contact has no phone number.
      */
     fun getNoPhoneNumberMessage(contactName: String, lang: SupportedLanguage): String {
@@ -179,6 +223,27 @@ object LanguageManager {
     }
 
     /**
+     * Formats response when multiple matching contacts are found.
+     */
+    fun getMultipleMatchesMessage(lang: SupportedLanguage): String {
+        return when (lang) {
+            SupportedLanguage.BENGALI -> "একাধিক মিল পাওয়া গেছে। অনুগ্রহ করে একটি নির্বাচন করুন।"
+            SupportedLanguage.HINDI -> "कई मिलान मिले हैं। कृपया एक चुनें।"
+            SupportedLanguage.ASSAMESE -> "একাধিক মিল পোৱা গৈছে। অনুগ্ৰহ কৰি এটা বাছনি কৰক।"
+            SupportedLanguage.GUJARATI -> "બહુવિધ મેળ મળ્યા. કૃપા કરીને એક પસંદ કરો."
+            SupportedLanguage.KANNADA -> "ಬಹು ಹೊಂದಾಣಿಕೆಗಳು ಕಂಡುಬಂದಿವೆ. ದಯವಿಟ್ಟು ಒಂದನ್ನು ಆಯ್ಕೆಮಾಡಿ."
+            SupportedLanguage.MALAYALAM -> "ഒന്നിലധികം പൊരുത്തങ്ങൾ കണ്ടെത്തി. ഒരെണ്ണം തിരഞ്ഞെടുക്കുക."
+            SupportedLanguage.MARATHI -> "अनेक जुळण्या सापडल्या. कृपया एक निवडा."
+            SupportedLanguage.ODIA -> "ଏକାଧିକ ମେଳ ମିଳିଲା। ଦୟାକରି ଗୋଟିଏ ବାଛନ୍ତୁ।"
+            SupportedLanguage.PUNJABI -> "ਕਈ ਮੇਲ ਮਿਲੇ ਹਨ। ਕਿਰਪਾ ਕਰਕੇ ਇੱਕ ਚੁਣੋ।"
+            SupportedLanguage.TAMIL -> "பல பொருத்தங்கள் கிடைத்துள்ளன. ஒன்றைத் தேர்ந்தெடுக்கவும்."
+            SupportedLanguage.TELUGU -> "బహుళ సరిపోలికలు దొరికాయి. దయచేసి ఒకదాన్ని ఎంచుకోండి."
+            SupportedLanguage.URDU -> "ایک سے زیادہ مماثلتیں ملیں۔ براہ کرم ایک کا انتخاب کریں۔"
+            SupportedLanguage.ENGLISH -> "Multiple matches found. Please select one."
+        }
+    }
+
+    /**
      * Formats response when call execution fails.
      */
     fun getCallFailedMessage(contactName: String, errorReason: String, lang: SupportedLanguage): String {
@@ -196,34 +261,6 @@ object LanguageManager {
             SupportedLanguage.TELUGU -> "కాల్ చేయడం సాధ్యం కాలేదు: $errorReason"
             SupportedLanguage.URDU -> "کال نہیں کی جا سکی: $errorReason"
             SupportedLanguage.ENGLISH -> "Could not make call: $errorReason"
-        }
-    }
-
-    /**
-     * Formats response when no matching contact is found (by query string).
-     */
-    fun getNoContactFoundMessage(query: String, lang: SupportedLanguage): String {
-        return getNoMatchMessage(query, lang)
-    }
-
-    /**
-     * Formats disambiguation prompt when multiple matches are found (with count).
-     */
-    fun getDisambiguationMessage(query: String, count: Int, lang: SupportedLanguage): String {
-        return when (lang) {
-            SupportedLanguage.BENGALI -> "\"$query\" নামে $count টি পরিচিতি পাওয়া গেছে। অনুগ্রহ করে একটি বেছে নিন:"
-            SupportedLanguage.HINDI -> "\"$query\" नाम के $count संपर्क मिले। कृपया एक चुनें:"
-            SupportedLanguage.ASSAMESE -> "\"$query\" নামত $count টা যোগাযোগ পোৱা গৈছে। অনুগ্ৰহ কৰি এটা বাছক:"
-            SupportedLanguage.GUJARATI -> "\"$query\" નામથી $count સંપર્કો મળ્યા. કૃપા કરીને એક પસંદ કરો:"
-            SupportedLanguage.KANNADA -> "\"$query\" ಹೆಸರಿನಲ್ಲಿ $count ಸಂಪರ್ಕಗಳು ಕಂಡುಬಂದಿವೆ. ದಯವಿಟ್ಟು ಒಂದನ್ನು ಆಯ್ಕೆಮಾಡಿ:"
-            SupportedLanguage.MALAYALAM -> "\"$query\" എന്ന പേരിൽ $count കോൺടാക്റ്റുകൾ കണ്ടെത്തി. ദയവായി ഒന്ന് തിരഞ്ഞെടുക്കുക:"
-            SupportedLanguage.MARATHI -> "\"$query\" नावाने $count संपर्क सापडले. कृपया एक निवडा:"
-            SupportedLanguage.ODIA -> "\"$query\" ନାମରେ $count ଟି ସମ୍ପର୍କ ମିଳିଲା। ଦୟାକରି ଗୋଟିଏ ବାଛନ୍ତୁ:"
-            SupportedLanguage.PUNJABI -> "\"$query\" ਨਾਮ ਨਾਲ $count ਸੰਪਰਕ ਮਿਲੇ। ਕਿਰਪਾ ਕਰਕੇ ਇੱਕ ਚੁਣੋ:"
-            SupportedLanguage.TAMIL -> "\"$query\" பெயரில் $count தொடர்புகள் கிடைத்துள்ளன. ஒன்றைத் தேர்ந்தெடுக்கவும்:"
-            SupportedLanguage.TELUGU -> "\"$query\" పేరుతో $count పరిచయాలు కనుగొనబడ్డాయి. దయచేసి ఒకదాన్ని ఎంచుకోండి:"
-            SupportedLanguage.URDU -> "\"$query\" نام کے $count رابطے ملے۔ براہ کرم ایک منتخب کریں:"
-            SupportedLanguage.ENGLISH -> "Found $count contacts matching \"$query\". Please choose one:"
         }
     }
 
@@ -291,19 +328,19 @@ object LanguageManager {
     }
 
     /**
-     * Formats spoken disambiguation prompt when a contact has multiple numbers.
-     * Matches the required natural spoken style:
-     * "[Name] নামে [X]টি নম্বর পেয়েছি। এক নম্বর — Mobile, শেষ চার সংখ্যা [digits]... কোনটিতে কল করব?"
+     * Formats spoken disambiguation prompt when a SINGLE contact has multiple unique phone numbers.
+     * Limits options to at most 3.
      */
     fun formatMultiNumberDisambiguationPrompt(
         contactName: String,
         options: List<PhoneNumberOption>,
         lang: SupportedLanguage
     ): String {
-        val count = options.size
+        val limitedOptions = options.take(3)
+        val count = limitedOptions.size
         val countWord = when (lang) {
-            SupportedLanguage.BENGALI -> when (count) { 2 -> "দুটি"; 3 -> "তিনটি"; 4 -> "চারটি"; else -> "$count টি" }
-            SupportedLanguage.HINDI -> when (count) { 2 -> "दो"; 3 -> "तीन"; 4 -> "चार"; else -> "$count" }
+            SupportedLanguage.BENGALI -> when (count) { 2 -> "দুটি"; 3 -> "তিনটি"; else -> "$count টি" }
+            SupportedLanguage.HINDI -> when (count) { 2 -> "दो"; 3 -> "तीन"; else -> "$count" }
             SupportedLanguage.ASSAMESE -> when (count) { 2 -> "দুটা"; 3 -> "তিনিটা"; else -> "$count টা" }
             SupportedLanguage.MARATHI -> when (count) { 2 -> "दोन"; 3 -> "तीन"; else -> "$count" }
             SupportedLanguage.GUJARATI -> when (count) { 2 -> "બે"; 3 -> "ત્રણ"; else -> "$count" }
@@ -333,7 +370,7 @@ object LanguageManager {
             SupportedLanguage.ENGLISH -> "Found $countWord numbers for $contactName."
         }
 
-        val optionLines = options.map { opt ->
+        val optionLines = limitedOptions.map { opt ->
             val idx = opt.optionIndex
             val indicDigits = DisambiguationResolver.toIndicDigits(opt.lastFourDigits, lang)
             val ordinal = getOrdinalIndexWord(idx, lang)
@@ -374,10 +411,91 @@ object LanguageManager {
         return "$header\n$optionLines\n$question"
     }
 
+    /**
+     * Formats spoken disambiguation prompt when MULTIPLE DIFFERENT CONTACTS match the query.
+     * Enforces a strict limit of 3 options.
+     */
+    fun formatMultiContactDisambiguationPrompt(
+        options: List<PhoneNumberOption>,
+        lang: SupportedLanguage
+    ): String {
+        val limitedOptions = options.take(3)
+        val count = limitedOptions.size
+        val countWord = when (lang) {
+            SupportedLanguage.BENGALI -> when (count) { 2 -> "দুটি"; 3 -> "তিনটি"; else -> "$count টি" }
+            SupportedLanguage.HINDI -> when (count) { 2 -> "दो"; 3 -> "तीन"; else -> "$count" }
+            SupportedLanguage.ASSAMESE -> when (count) { 2 -> "দুটা"; 3 -> "তিনিটা"; else -> "$count টা" }
+            SupportedLanguage.MARATHI -> when (count) { 2 -> "दोन"; 3 -> "तीन"; else -> "$count" }
+            SupportedLanguage.GUJARATI -> when (count) { 2 -> "બે"; 3 -> "ત્રણ"; else -> "$count" }
+            SupportedLanguage.PUNJABI -> when (count) { 2 -> "ਦੋ"; 3 -> "ਤਿੰਨ"; else -> "$count" }
+            SupportedLanguage.ODIA -> when (count) { 2 -> "ଦୁଇଟି"; 3 -> "ତିନୋଟି"; else -> "$count ଟି" }
+            SupportedLanguage.TAMIL -> when (count) { 2 -> "இரண்டு"; 3 -> "மூன்று"; else -> "$count" }
+            SupportedLanguage.TELUGU -> when (count) { 2 -> "రెండు"; 3 -> "మూడు"; else -> "$count" }
+            SupportedLanguage.KANNADA -> when (count) { 2 -> "ಎರಡು"; 3 -> "ಮೂರು"; else -> "$count" }
+            SupportedLanguage.MALAYALAM -> when (count) { 2 -> "രണ്ട്"; 3 -> "മൂന്ന്"; else -> "$count" }
+            SupportedLanguage.URDU -> when (count) { 2 -> "دو"; 3 -> "تین"; else -> "$count" }
+            SupportedLanguage.ENGLISH -> "$count"
+        }
+
+        val header = when (lang) {
+            SupportedLanguage.BENGALI -> "আমি একাধিক মিল পেয়েছি। প্রথম $countWord বলছি:"
+            SupportedLanguage.HINDI -> "मुझे कई मिलान मिले हैं। पहले $countWord बता रहा हूँ:"
+            SupportedLanguage.ASSAMESE -> "মই একাধিক মিল পাইছোঁ। প্ৰথম $countWord কৈছোঁ:"
+            SupportedLanguage.GUJARATI -> "મને ઘણા મેળ મળ્યા છે. પ્રથમ $countWord જણાવી રહ્યો છું:"
+            SupportedLanguage.KANNADA -> "ನನಗೆ ಬಹು ಹೊಂದಾಣಿಕೆಗಳು ಸಿಕ್ಕಿವೆ. ಮೊದಲ $countWord ಹೇಳುತ್ತಿದ್ದೇನೆ:"
+            SupportedLanguage.MALAYALAM -> "ഒന്നിലധികം പൊരുത്തങ്ങൾ കണ്ടെത്തി. ആദ്യത്തെ $countWord എണ്ണം പറയുന്നു:"
+            SupportedLanguage.MARATHI -> "मला अनेक जुळण्या सापडल्या आहेत. पहिले $countWord सांगत आहे:"
+            SupportedLanguage.ODIA -> "ମୋତେ ଏକାଧିକ ମେଳ ମିଳିଲା। ପ୍ରଥମ $countWord କହୁଛି:"
+            SupportedLanguage.PUNJABI -> "ਮੈਨੂੰ ਕਈ ਮੇਲ ਮਿਲੇ ਹਨ। ਪਹਿਲੇ $countWord ਦੱਸ ਰਿਹਾ ਹਾਂ:"
+            SupportedLanguage.TAMIL -> "பல பொருத்தங்கள் கிடைத்துள்ளன. முதல் $countWord கூறுகிறேன்:"
+            SupportedLanguage.TELUGU -> "నాకు బహుళ సరిపోలికలు దొరికాయి. మొదటి $countWord చెబుతున్నాను:"
+            SupportedLanguage.URDU -> "مجھے ایک سے زیادہ مماثلتیں ملیں۔ پہلے $countWord بتا رہا ہوں:"
+            SupportedLanguage.ENGLISH -> "I found multiple matches. Here are the first $countWord:"
+        }
+
+        val optionLines = limitedOptions.map { opt ->
+            val indicDigits = DisambiguationResolver.toIndicDigits(opt.lastFourDigits, lang)
+
+            when (lang) {
+                SupportedLanguage.BENGALI -> "${opt.contactName} — ${opt.label} — শেষ চার সংখ্যা $indicDigits।"
+                SupportedLanguage.HINDI -> "${opt.contactName} — ${opt.label} — अंतिम चार अंक $indicDigits।"
+                SupportedLanguage.ASSAMESE -> "${opt.contactName} — ${opt.label} — শেষ চাৰিটা সংখ্যা $indicDigits।"
+                SupportedLanguage.GUJARATI -> "${opt.contactName} — ${opt.label} — છેલ્લા ચાર અંક $indicDigits."
+                SupportedLanguage.KANNADA -> "${opt.contactName} — ${opt.label} — ಕೊನೆಯ ನಾಲ್ಕು ಅಂಕಿಗಳು $indicDigits."
+                SupportedLanguage.MALAYALAM -> "${opt.contactName} — ${opt.label} — അവസാന നാല് അക്കങ്ങൾ $indicDigits."
+                SupportedLanguage.MARATHI -> "${opt.contactName} — ${opt.label} — शेवटचे चार अंक $indicDigits."
+                SupportedLanguage.ODIA -> "${opt.contactName} — ${opt.label} — ଶେଷ ଚାରିଟି ଅଙ୍କ $indicDigits।"
+                SupportedLanguage.PUNJABI -> "${opt.contactName} — ${opt.label} — ਆਖਰੀ ਚਾਰ ਅੰਕ $indicDigits।"
+                SupportedLanguage.TAMIL -> "${opt.contactName} — ${opt.label} — கடைசி நான்கு இலக்கங்கள் $indicDigits."
+                SupportedLanguage.TELUGU -> "${opt.contactName} — ${opt.label} — చివరి నాలుగు అంకెలు $indicDigits."
+                SupportedLanguage.URDU -> "${opt.contactName} — ${opt.label} — آخری چار ہندسے $indicDigits۔"
+                SupportedLanguage.ENGLISH -> "${opt.contactName} — ${opt.label} — ending in ${opt.lastFourDigits}."
+            }
+        }.joinToString("\n")
+
+        val question = when (lang) {
+            SupportedLanguage.BENGALI -> "কোনটিতে কল করব?"
+            SupportedLanguage.HINDI -> "किस पर कॉल करूँ?"
+            SupportedLanguage.ASSAMESE -> "কোনটোত কল কৰিম?"
+            SupportedLanguage.GUJARATI -> "કયા નંબર પર કોલ કરું?"
+            SupportedLanguage.KANNADA -> "ಯಾವ ಸಂಖ್ಯೆಗೆ ಕರೆ ಮಾಡಲಿ?"
+            SupportedLanguage.MALAYALAM -> "ഏതിലേക്ക് വിളിക്കണം?"
+            SupportedLanguage.MARATHI -> "कोणत्या नंबरवर कॉल करू?"
+            SupportedLanguage.ODIA -> "କେଉଁଥିରେ କଲ୍ କରିବି?"
+            SupportedLanguage.PUNJABI -> "ਕਿਸ ਉੱਤੇ ਕਾਲ ਕਰਾਂ?"
+            SupportedLanguage.TAMIL -> "எதற்கு அழைக்க வேண்டும்?"
+            SupportedLanguage.TELUGU -> "దేనికి కాల్ చేయాలి?"
+            SupportedLanguage.URDU -> "کس پر کال کروں؟"
+            SupportedLanguage.ENGLISH -> "Which one would you like to call?"
+        }
+
+        return "$header\n$optionLines\n$question"
+    }
+
     private fun getOrdinalIndexWord(idx: Int, lang: SupportedLanguage): String {
         return when (lang) {
-            SupportedLanguage.BENGALI -> when (idx) { 1 -> "এক নম্বর"; 2 -> "দুই নম্বর"; 3 -> "তিন নম্বর"; 4 -> "চার নম্বর"; else -> "$idx নম্বর" }
-            SupportedLanguage.HINDI -> when (idx) { 1 -> "एक नंबर"; 2 -> "दो नंबर"; 3 -> "तीन नंबर"; 4 -> "चार नंबर"; else -> "$idx नंबर" }
+            SupportedLanguage.BENGALI -> when (idx) { 1 -> "এক নম্বর"; 2 -> "দুই নম্বর"; 3 -> "তিন নম্বর"; else -> "$idx নম্বর" }
+            SupportedLanguage.HINDI -> when (idx) { 1 -> "एक नंबर"; 2 -> "दो नंबर"; 3 -> "तीन नंबर"; else -> "$idx नंबर" }
             SupportedLanguage.ASSAMESE -> when (idx) { 1 -> "এক নম্বৰ"; 2 -> "দুই নম্বৰ"; 3 -> "তিনি নম্বৰ"; else -> "$idx নম্বৰ" }
             SupportedLanguage.GUJARATI -> when (idx) { 1 -> "એક નંબર"; 2 -> "બે નંબર"; 3 -> "ત્રણ નંબર"; else -> "$idx નંબર" }
             SupportedLanguage.KANNADA -> when (idx) { 1 -> "ಒಂದನೇ ಸಂಖ್ಯೆ"; 2 -> "ಎರಡನೇ ಸಂಖ್ಯೆ"; 3 -> "ಮೂರನೇ ಸಂಖ್ಯೆ"; else -> "$idx" }
@@ -388,7 +506,7 @@ object LanguageManager {
             SupportedLanguage.TAMIL -> when (idx) { 1 -> "ஒன்றாம் எண்"; 2 -> "இரண்டாம் எண்"; 3 -> "மூன்றாம் எண்"; else -> "$idx" }
             SupportedLanguage.TELUGU -> when (idx) { 1 -> "ఒకటో నంబరు"; 2 -> "రెండో నంబరు"; 3 -> "మూడో నంబరు"; else -> "$idx" }
             SupportedLanguage.URDU -> when (idx) { 1 -> "پہلا نمبر"; 2 -> "دوسرا نمبر"; 3 -> "تیسرا نمبر"; else -> "$idx" }
-            SupportedLanguage.ENGLISH -> when (idx) { 1 -> "Option 1"; 2 -> "Option 2"; 3 -> "Option 3"; 4 -> "Option 4"; else -> "Option $idx" }
+            SupportedLanguage.ENGLISH -> when (idx) { 1 -> "Option 1"; 2 -> "Option 2"; 3 -> "Option 3"; else -> "Option $idx" }
         }
     }
 

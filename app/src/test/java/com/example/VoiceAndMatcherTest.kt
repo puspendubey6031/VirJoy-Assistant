@@ -9,7 +9,12 @@ import com.example.model.SupportedLanguage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
 class VoiceAndMatcherTest {
 
     // ==========================================
@@ -468,5 +473,245 @@ class VoiceAndMatcherTest {
         // 4. Spoken last 4 digits "3211"
         val match7 = com.example.manager.DisambiguationResolver.resolveOption("3211 নম্বরে লাগাও", options, SupportedLanguage.BENGALI)
         assertEquals(2, match7?.optionIndex)
+    }
+
+    // ==========================================
+    // 7. Contact Resolution & Deduplication Tests
+    // ==========================================
+
+    @Test
+    fun testPhoneNumberNormalizationAndDeduplication() {
+        val raw1 = "+91 98765 43210"
+        val raw2 = "9876543210"
+        val raw3 = "09876543210"
+        val raw4 = "98765-43210"
+
+        val norm1 = com.example.manager.ContactManager.normalizePhoneNumber(raw1)
+        val norm2 = com.example.manager.ContactManager.normalizePhoneNumber(raw2)
+        val norm3 = com.example.manager.ContactManager.normalizePhoneNumber(raw3)
+        val norm4 = com.example.manager.ContactManager.normalizePhoneNumber(raw4)
+
+        assertEquals("9876543210", norm1)
+        assertEquals("9876543210", norm2)
+        assertEquals("9876543210", norm3)
+        assertEquals("9876543210", norm4)
+    }
+
+    @Test
+    fun testSingleNumberContactDirectCall() {
+        val singleNumberContact = Contact(
+            id = "101",
+            name = "Prasanta Das",
+            phoneNumbers = listOf("+919876543210"),
+            labeledPhoneNumbers = listOf(
+                com.example.model.PhoneNumberOption(
+                    number = "+919876543210",
+                    label = "Mobile",
+                    lastFourDigits = "3210",
+                    optionIndex = 1,
+                    contactName = "Prasanta Das"
+                )
+            )
+        )
+
+        val contactManager = com.example.manager.ContactManager()
+
+        val result = contactManager.findBestContactMatch("Prasanta Das", listOf(singleNumberContact))
+        assertTrue("Single number contact must resolve to SingleMatch directly", result is com.example.model.ContactMatchResult.SingleMatch)
+        val singleMatch = result as com.example.model.ContactMatchResult.SingleMatch
+        assertEquals("Prasanta Das", singleMatch.contact.name)
+        assertEquals("+919876543210", singleMatch.phoneNumber)
+    }
+
+    @Test
+    fun testTwoNumberContactDisambiguation() {
+        val twoNumberContact = Contact(
+            id = "102",
+            name = "Rahul Sharma",
+            phoneNumbers = listOf("+919876543210", "+919876543211"),
+            labeledPhoneNumbers = listOf(
+                com.example.model.PhoneNumberOption(
+                    number = "+919876543210",
+                    label = "Mobile",
+                    lastFourDigits = "3210",
+                    optionIndex = 1,
+                    contactName = "Rahul Sharma"
+                ),
+                com.example.model.PhoneNumberOption(
+                    number = "+919876543211",
+                    label = "Home",
+                    lastFourDigits = "3211",
+                    optionIndex = 2,
+                    contactName = "Rahul Sharma"
+                )
+            )
+        )
+
+        val contactManager = com.example.manager.ContactManager()
+
+        val result = contactManager.findBestContactMatch("Rahul Sharma", listOf(twoNumberContact))
+        assertTrue("Two number contact must trigger DisambiguationRequired", result is com.example.model.ContactMatchResult.DisambiguationRequired)
+        val disambig = result as com.example.model.ContactMatchResult.DisambiguationRequired
+        assertEquals("Rahul Sharma", disambig.contactName)
+        assertEquals(2, disambig.options.size)
+    }
+
+    @Test
+    fun testTwoSeparateContactsRemainDistinctAndNotCombined() {
+        val contact1 = Contact(
+            id = "201",
+            name = "Prasanta Das",
+            phoneNumbers = listOf("+919876511111"),
+            labeledPhoneNumbers = listOf(
+                com.example.model.PhoneNumberOption(
+                    number = "+919876511111",
+                    label = "Mobile",
+                    lastFourDigits = "1111",
+                    optionIndex = 1,
+                    contactName = "Prasanta Das"
+                )
+            )
+        )
+        val contact2 = Contact(
+            id = "202",
+            name = "Prasanta Ghosh",
+            phoneNumbers = listOf("+919876522222"),
+            labeledPhoneNumbers = listOf(
+                com.example.model.PhoneNumberOption(
+                    number = "+919876522222",
+                    label = "Mobile",
+                    lastFourDigits = "2222",
+                    optionIndex = 1,
+                    contactName = "Prasanta Ghosh"
+                )
+            )
+        )
+
+        val contactManager = com.example.manager.ContactManager()
+
+        val result = contactManager.findBestContactMatch("Prasanta", listOf(contact1, contact2))
+        assertTrue("Ambiguous query across two distinct contacts must return MultipleMatches", result is com.example.model.ContactMatchResult.MultipleMatches)
+        val multi = result as com.example.model.ContactMatchResult.MultipleMatches
+        assertEquals(2, multi.contacts.size)
+        // Ensure each contact retains only its own phone number
+        assertEquals(1, multi.contacts[0].phoneNumbers.size)
+        assertEquals(1, multi.contacts[1].phoneNumbers.size)
+        assertTrue(multi.contacts[0].name != multi.contacts[1].name)
+    }
+
+    // ==========================================
+    // 8. Cancellation & Stop Recognition Tests
+    // ==========================================
+
+    @Test
+    fun testCancelAndStopPhrases() {
+        // Bengali
+        assertTrue(LanguageManager.isCancelOrStopPhrase("থামো"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("বন্ধ করো"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("চুপ করো"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("স্টপ করো"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("স্টপ"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("রিসেট"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("বাদ দাও"))
+
+        // Hindi
+        assertTrue(LanguageManager.isCancelOrStopPhrase("रुको"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("बंद करो"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("चुप करो"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("स्टॉप"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("कैंसिल"))
+
+        // English
+        assertTrue(LanguageManager.isCancelOrStopPhrase("stop"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("cancel"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("shut up"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("reset"))
+
+        // Other Indian Languages & Romanized expressions
+        assertTrue(LanguageManager.isCancelOrStopPhrase("રોકો"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("थांबा"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("ਰੋਕੋ"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("நிறுத்து"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("ఆపు"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("ನಿಲ್ಲಿಸಿ"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("നിർത്തൂ"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("روکو"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("thamo"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("ruko"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("band koro"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("band karo"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("chup"))
+        assertTrue(LanguageManager.isCancelOrStopPhrase("রুকো"))
+    }
+
+    @Test
+    fun testMixedLanguageVoiceCommands() {
+        // "বাবুকে call করো"
+        val cmd1 = VoiceCommandParser.parse("বাবুকে call করো")
+        assertTrue(cmd1 is ParsedVoiceCommand.CallContact)
+        assertEquals("বাবু", (cmd1 as ParsedVoiceCommand.CallContact).targetName)
+
+        // "please rahul ko phone karo"
+        val cmd2 = VoiceCommandParser.parse("please rahul ko phone karo")
+        assertTrue(cmd2 is ParsedVoiceCommand.CallContact)
+        assertEquals("rahul", (cmd2 as ParsedVoiceCommand.CallContact).targetName)
+
+        // "phone Vinod"
+        val cmd3 = VoiceCommandParser.parse("phone Vinod")
+        assertTrue(cmd3 is ParsedVoiceCommand.CallContact)
+        assertEquals("Vinod", (cmd3 as ParsedVoiceCommand.CallContact).targetName)
+    }
+
+    @Test
+    fun testMixedLanguageDisambiguationResolution() {
+        val options = listOf(
+            com.example.model.PhoneNumberOption(
+                number = "+919876543210",
+                label = "Mobile",
+                lastFourDigits = "3210",
+                optionIndex = 1,
+                contactName = "Rahul"
+            ),
+            com.example.model.PhoneNumberOption(
+                number = "+919876543211",
+                label = "Home",
+                lastFourDigits = "3211",
+                optionIndex = 2,
+                contactName = "Rahul"
+            )
+        )
+
+        // "yes" -> option 1
+        val optYes = com.example.manager.DisambiguationResolver.resolveOption("yes", options)
+        assertEquals(1, optYes?.optionIndex)
+
+        // "no" -> option 2
+        val optNo = com.example.manager.DisambiguationResolver.resolveOption("no", options)
+        assertEquals(2, optNo?.optionIndex)
+
+        // "home" -> option 2
+        val optHome = com.example.manager.DisambiguationResolver.resolveOption("home", options)
+        assertEquals(2, optHome?.optionIndex)
+
+        // "mobile" -> option 1
+        val optMob = com.example.manager.DisambiguationResolver.resolveOption("mobile", options)
+        assertEquals(1, optMob?.optionIndex)
+    }
+
+    @Test
+    fun testMultiContactDisambiguationPromptLimitThree() {
+        val options = listOf(
+            com.example.model.PhoneNumberOption("+919876500001", "Mobile", "0001", 1, "User One"),
+            com.example.model.PhoneNumberOption("+919876500002", "Mobile", "0002", 2, "User Two"),
+            com.example.model.PhoneNumberOption("+919876500003", "Mobile", "0003", 3, "User Three"),
+            com.example.model.PhoneNumberOption("+919876500004", "Mobile", "0004", 4, "User Four")
+        )
+
+        val promptBengali = LanguageManager.formatMultiContactDisambiguationPrompt(options, SupportedLanguage.BENGALI)
+        assertTrue(promptBengali.contains("User One"))
+        assertTrue(promptBengali.contains("User Two"))
+        assertTrue(promptBengali.contains("User Three"))
+        // Fourth option must be excluded to enforce maximum 3 limit
+        assertTrue(!promptBengali.contains("User Four"))
     }
 }

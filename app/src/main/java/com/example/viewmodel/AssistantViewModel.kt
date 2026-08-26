@@ -2,6 +2,7 @@ package com.example.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.manager.BengaliHindiEnglishMatcher
@@ -13,17 +14,23 @@ import com.example.manager.ParsedVoiceCommand
 import com.example.manager.SpeechManager
 import com.example.manager.VoiceCommandParser
 import com.example.manager.WakeNameDetector
+import com.example.model.AssistantAvailabilityMode
 import com.example.model.AssistantListeningMode
 import com.example.model.Contact
 import com.example.model.ContactMatchResult
 import com.example.model.PhoneNumberOption
 import com.example.model.SupportedLanguage
 import com.example.model.VoiceGender
+import com.example.service.AssistantForegroundService
+import com.example.service.AssistantServiceBridge
+import com.example.service.ServiceUserAction
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -32,26 +39,35 @@ data class AssistantUiState(
     val wakeName: String = "VirJoy",
     val voiceGender: VoiceGender = VoiceGender.FEMALE,
     val selectedLanguage: SupportedLanguage = SupportedLanguage.ENGLISH,
-    val listeningMode: AssistantListeningMode = AssistantListeningMode.WAKE_LISTENING,
+    val isHandsFreeEnabled: Boolean = true,
+    val availabilityMode: AssistantAvailabilityMode = AssistantAvailabilityMode.ACTIVE,
+    val scheduleStartHour: Int = 8,
+    val scheduleStartMinute: Int = 0,
+    val scheduleEndHour: Int = 22,
+    val scheduleEndMinute: Int = 0,
     val isListening: Boolean = false,
+    val listeningMode: AssistantListeningMode = AssistantListeningMode.INACTIVE,
     val recognizedText: String = "",
-    val responseText: String = "Say \"VirJoy\" to activate",
+    val responseText: String = "Say \"VirJoy\" or tap microphone to speak",
+    val currentLanguage: SupportedLanguage = SupportedLanguage.ENGLISH,
     val multipleMatches: List<Contact> = emptyList(),
     val disambiguationOptions: List<PhoneNumberOption> = emptyList(),
-    val isSettingsOpen: Boolean = false,
     val hasAllPermissions: Boolean = false,
-    val rmsLevel: Float = 0f,
-    val currentLanguage: SupportedLanguage = SupportedLanguage.ENGLISH,
-    val isHandsFreeEnabled: Boolean = true
+    val isSettingsOpen: Boolean = false,
+    val rmsLevel: Float = 0f
 )
 
 class AssistantViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val context: Context = application.applicationContext
+    companion object {
+        private const val TAG = "AssistantViewModel"
+    }
+
+    private val context: Context get() = getApplication<Application>().applicationContext
     private val contactManager = ContactManager(context)
     private val callManager = CallManager(context)
 
-    private val _uiState = MutableStateFlow(loadInitialSettings())
+    private val _uiState = MutableStateFlow(AssistantUiState())
     val uiState: StateFlow<AssistantUiState> = _uiState.asStateFlow()
 
     private var speechManager: SpeechManager? = null
@@ -59,83 +75,129 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     private var commandTimeoutJob: Job? = null
 
     init {
+        loadSettings()
+        observeServiceBridge()
         initSpeechManager()
     }
 
-    private fun loadInitialSettings(): AssistantUiState {
-        val prefs = context.getSharedPreferences("virjoy_prefs", Context.MODE_PRIVATE)
-        val name = prefs.getString("assistant_name", "VirJoy Assistant") ?: "VirJoy Assistant"
-        val wakeName = prefs.getString("wake_name", "VirJoy") ?: "VirJoy"
-        val voiceName = prefs.getString("voice_gender", VoiceGender.FEMALE.name) ?: VoiceGender.FEMALE.name
-        val langCode = prefs.getString("selected_language", SupportedLanguage.ENGLISH.name) ?: SupportedLanguage.ENGLISH.name
-        val isHandsFree = prefs.getBoolean("is_handsfree_enabled", true)
+    private fun observeServiceBridge() {
+        AssistantServiceBridge.serviceState.onEach { svcState ->
+            if (svcState.isServiceRunning) {
+                _uiState.update { current ->
+                    current.copy(
+                        assistantName = svcState.assistantName,
+                        wakeName = svcState.wakeName,
+                        voiceGender = svcState.voiceGender,
+                        selectedLanguage = svcState.selectedLanguage,
+                        isHandsFreeEnabled = svcState.isHandsFreeEnabled,
+                        availabilityMode = svcState.availabilityMode,
+                        scheduleStartHour = svcState.scheduleStartHour,
+                        scheduleStartMinute = svcState.scheduleStartMinute,
+                        scheduleEndHour = svcState.scheduleEndHour,
+                        scheduleEndMinute = svcState.scheduleEndMinute,
+                        isListening = svcState.isListening,
+                        listeningMode = svcState.listeningMode,
+                        recognizedText = svcState.recognizedText,
+                        responseText = svcState.responseText,
+                        currentLanguage = svcState.currentLanguage,
+                        multipleMatches = svcState.multipleMatches,
+                        disambiguationOptions = svcState.disambiguationOptions,
+                        rmsLevel = svcState.rmsLevel
+                    )
+                }
+            }
+        }.launchIn(viewModelScope)
+    }
 
-        val gender = try {
-            VoiceGender.valueOf(voiceName)
+    private fun loadSettings() {
+        val prefs = context.getSharedPreferences("virjoy_prefs", Context.MODE_PRIVATE)
+        val assistantName = prefs.getString("assistant_name", "VirJoy Assistant") ?: "VirJoy Assistant"
+        val wakeName = prefs.getString("wake_name", "VirJoy") ?: "VirJoy"
+        val voiceGenderStr = prefs.getString("voice_gender", VoiceGender.FEMALE.name) ?: VoiceGender.FEMALE.name
+        val voiceGender = try {
+            VoiceGender.valueOf(voiceGenderStr)
         } catch (e: Exception) {
             VoiceGender.FEMALE
         }
-        val language = try {
-            SupportedLanguage.valueOf(langCode)
+        val languageStr = prefs.getString("selected_language", SupportedLanguage.ENGLISH.name) ?: SupportedLanguage.ENGLISH.name
+        val selectedLanguage = try {
+            SupportedLanguage.valueOf(languageStr)
         } catch (e: Exception) {
-            SupportedLanguage.fromCode(langCode)
+            SupportedLanguage.ENGLISH
         }
+        val isHandsFree = prefs.getBoolean("is_handsfree_enabled", true)
+        val modeStr = prefs.getString("availability_mode", AssistantAvailabilityMode.ACTIVE.name) ?: AssistantAvailabilityMode.ACTIVE.name
+        val availabilityMode = AssistantAvailabilityMode.fromString(modeStr)
+        val startH = prefs.getInt("schedule_start_hour", 8)
+        val startM = prefs.getInt("schedule_start_minute", 0)
+        val endH = prefs.getInt("schedule_end_hour", 22)
+        val endM = prefs.getInt("schedule_end_minute", 0)
 
-        val initialPrompt = LanguageManager.getWakeIdlePrompt(wakeName, language)
-
-        return AssistantUiState(
-            assistantName = name,
-            wakeName = wakeName,
-            voiceGender = gender,
-            selectedLanguage = language,
-            currentLanguage = language,
-            responseText = initialPrompt,
-            listeningMode = AssistantListeningMode.WAKE_LISTENING,
-            isHandsFreeEnabled = isHandsFree
-        )
+        _uiState.update {
+            it.copy(
+                assistantName = assistantName,
+                wakeName = wakeName,
+                voiceGender = voiceGender,
+                selectedLanguage = selectedLanguage,
+                currentLanguage = selectedLanguage,
+                isHandsFreeEnabled = isHandsFree,
+                availabilityMode = availabilityMode,
+                scheduleStartHour = startH,
+                scheduleStartMinute = startM,
+                scheduleEndHour = endH,
+                scheduleEndMinute = endM,
+                responseText = LanguageManager.getWakeIdlePrompt(wakeName, selectedLanguage)
+            )
+        }
     }
 
     private fun initSpeechManager() {
         speechManager = SpeechManager(
             context = context,
-            onSpeechResult = { text ->
-                handleSpeechResult(text)
+            onSpeechResult = { recognizedText ->
+                handleSpeechResult(recognizedText)
             },
             onListeningStateChanged = { listening ->
-                _uiState.update { it.copy(isListening = listening, rmsLevel = if (!listening) 0f else it.rmsLevel) }
+                _uiState.update { it.copy(isListening = listening) }
             },
-            onError = { error ->
-                handleSpeechError(error)
+            onError = { errorMessage ->
+                handleSpeechError(errorMessage)
             },
             onRmsChangedCallback = { rms ->
                 _uiState.update { it.copy(rmsLevel = rms) }
             }
-        ).apply {
-            updateVoiceGender(_uiState.value.voiceGender)
-            updateLanguage(_uiState.value.selectedLanguage)
-            setContinuousListeningEnabled(_uiState.value.isHandsFreeEnabled)
-        }
+        )
+
+        speechManager?.updateVoiceGender(_uiState.value.voiceGender)
+        speechManager?.updateLanguage(_uiState.value.selectedLanguage)
+        speechManager?.setContinuousListeningEnabled(_uiState.value.isHandsFreeEnabled)
     }
 
-    private fun handleSpeechError(error: String) {
-        val mode = _uiState.value.listeningMode
-        if (mode == AssistantListeningMode.COMMAND_LISTENING || mode == AssistantListeningMode.DISAMBIGUATION_LISTENING) {
-            _uiState.update { it.copy(isListening = false, responseText = error, rmsLevel = 0f) }
-            startCommandTimeoutJob(3000L)
-        } else {
-            // In wake listening mode, keep UI clean and silently continue wake monitoring
-            _uiState.update { it.copy(isListening = false, rmsLevel = 0f) }
-            if (_uiState.value.hasAllPermissions && _uiState.value.isHandsFreeEnabled) {
-                speechManager?.scheduleRestartListening(_uiState.value.selectedLanguage, 800L)
-            }
+    private fun handleSpeechError(errorMessage: String) {
+        Log.w(TAG, "Speech error: $errorMessage")
+        val currentMode = _uiState.value.listeningMode
+        if (currentMode == AssistantListeningMode.COMMAND_LISTENING) {
+            returnToWakeListening()
         }
     }
 
     fun onMicClicked() {
+        toggleListening()
+    }
+
+    /**
+     * Toggles speech listening manually when the microphone button is pressed.
+     */
+    fun toggleListening() {
         if (!_uiState.value.hasAllPermissions) {
             _uiState.update {
-                it.copy(responseText = "Please grant Microphone, Contacts, and Call permissions to continue.")
+                it.copy(responseText = "Please grant Microphone, Contacts, and Phone permissions first.")
             }
+            return
+        }
+
+        if (AssistantServiceBridge.serviceState.value.isServiceRunning) {
+            AssistantServiceBridge.postAction(ServiceUserAction.ToggleListening)
             return
         }
 
@@ -162,6 +224,24 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun handleSpeechResult(rawText: String) {
+        // Immediate cancellation & stop handling
+        if (LanguageManager.isCancelOrStopPhrase(rawText)) {
+            commandTimeoutJob?.cancel()
+            speechManager?.stopSpeaking()
+            val lang = _uiState.value.selectedLanguage
+            val cancelledMsg = LanguageManager.getCancelledMessage(lang)
+            _uiState.update {
+                it.copy(
+                    recognizedText = rawText,
+                    responseText = cancelledMsg,
+                    multipleMatches = emptyList(),
+                    disambiguationOptions = emptyList()
+                )
+            }
+            returnToWakeListeningDelayed(1000L)
+            return
+        }
+
         val currentMode = _uiState.value.listeningMode
         val preferredLang = _uiState.value.selectedLanguage
         val configuredWake = _uiState.value.wakeName
@@ -223,17 +303,30 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                 if (resolved != null) {
                     initiateCall(resolved.contactName, resolved.number, lang)
                 } else {
-                    // Could not match voice option, prompt again or timeout
-                    val retryMsg = when (lang) {
-                        SupportedLanguage.BENGALI -> "বুঝতে পারিনি। ১ নম্বর নাকি ২ নম্বর?"
-                        SupportedLanguage.HINDI -> "समझ नहीं आया। एक नंबर या दो नंबर?"
-                        else -> "Could not understand. Option 1 or Option 2?"
-                    }
-                    _uiState.update { it.copy(responseText = retryMsg) }
-                    speechManager?.speak(retryMsg, lang) {
-                        if (_uiState.value.listeningMode == AssistantListeningMode.DISAMBIGUATION_LISTENING) {
-                            speechManager?.startCommandListening(lang)
-                            startCommandTimeoutJob(8000L)
+                    // Check if the user is giving a brand new command instead
+                    val parsedNew = VoiceCommandParser.parse(rawText, preferredLang)
+                    if (parsedNew is ParsedVoiceCommand.CallContact) {
+                        _uiState.update {
+                            it.copy(
+                                listeningMode = AssistantListeningMode.COMMAND_LISTENING,
+                                multipleMatches = emptyList(),
+                                disambiguationOptions = emptyList()
+                            )
+                        }
+                        executeParsedCommand(rawText)
+                    } else {
+                        // Could not match voice option, prompt again
+                        val retryMsg = when (lang) {
+                            SupportedLanguage.BENGALI -> "বুঝতে পারিনি। ১ নম্বর নাকি ২ নম্বর?"
+                            SupportedLanguage.HINDI -> "समझ नहीं आया। एक नंबर या दो नंबर?"
+                            else -> "Could not understand. Option 1 or Option 2?"
+                        }
+                        _uiState.update { it.copy(responseText = retryMsg) }
+                        speechManager?.speak(retryMsg, lang) {
+                            if (_uiState.value.listeningMode == AssistantListeningMode.DISAMBIGUATION_LISTENING) {
+                                speechManager?.startCommandListening(lang)
+                                startCommandTimeoutJob(8000L)
+                            }
                         }
                     }
                 }
@@ -251,31 +344,31 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     private fun executeParsedCommand(commandText: String) {
         val preferredLang = _uiState.value.selectedLanguage
         val parsed = VoiceCommandParser.parse(commandText, preferredLang)
-        val detectedLanguage = parsed.detectedLanguage
-        lastDetectedLanguage = detectedLanguage
+        val responseLanguage = preferredLang
+        lastDetectedLanguage = responseLanguage
 
         _uiState.update {
             it.copy(
-                currentLanguage = detectedLanguage
+                currentLanguage = responseLanguage
             )
         }
 
         viewModelScope.launch {
             when (parsed) {
                 is ParsedVoiceCommand.CallContact -> {
-                    processCallContact(parsed.targetName, detectedLanguage)
+                    processCallContact(parsed.targetName, responseLanguage)
                 }
                 is ParsedVoiceCommand.Unknown -> {
                     val cleaned = BengaliHindiEnglishMatcher.cleanContactQuery(commandText)
                     val target = if (cleaned.isNotEmpty()) cleaned else commandText
-                    processCallContact(target, detectedLanguage)
+                    processCallContact(target, responseLanguage)
                 }
             }
         }
     }
 
     private fun processCallContact(targetName: String, language: SupportedLanguage) {
-        when (val matchResult = contactManager.findBestContactMatch(targetName)) {
+        when (val matchResult = contactManager.findBestContactMatch(targetName, targetName)) {
             is ContactMatchResult.SingleMatch -> {
                 val contact = matchResult.contact
                 val phone = matchResult.phoneNumber
@@ -296,16 +389,17 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             }
             is ContactMatchResult.DisambiguationRequired -> {
+                val limitedOptions = matchResult.options.take(3)
                 val spokenPrompt = LanguageManager.formatMultiNumberDisambiguationPrompt(
                     matchResult.contactName,
-                    matchResult.options,
+                    limitedOptions,
                     language
                 )
                 _uiState.update {
                     it.copy(
                         listeningMode = AssistantListeningMode.DISAMBIGUATION_LISTENING,
                         responseText = spokenPrompt,
-                        disambiguationOptions = matchResult.options,
+                        disambiguationOptions = limitedOptions,
                         multipleMatches = emptyList()
                     )
                 }
@@ -317,17 +411,19 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             }
             is ContactMatchResult.MultipleMatches -> {
-                val options = matchResult.contacts.mapIndexed { idx, c ->
+                val limitedContacts = matchResult.contacts.take(3)
+                val options = limitedContacts.mapIndexed { idx, c ->
+                    val label = c.labeledPhoneNumbers.firstOrNull()?.label ?: "Mobile"
+                    val last4 = if (c.primaryPhoneNumber.length >= 4) c.primaryPhoneNumber.takeLast(4) else c.primaryPhoneNumber
                     PhoneNumberOption(
                         number = c.primaryPhoneNumber,
-                        label = c.name,
-                        lastFourDigits = c.primaryPhoneNumber.takeLast(4),
+                        label = label,
+                        lastFourDigits = last4,
                         optionIndex = idx + 1,
                         contactName = c.name
                     )
                 }
-                val spokenPrompt = LanguageManager.formatMultiNumberDisambiguationPrompt(
-                    targetName,
+                val spokenPrompt = LanguageManager.formatMultiContactDisambiguationPrompt(
                     options,
                     language
                 )
@@ -336,7 +432,7 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                         listeningMode = AssistantListeningMode.DISAMBIGUATION_LISTENING,
                         responseText = spokenPrompt,
                         disambiguationOptions = options,
-                        multipleMatches = matchResult.contacts
+                        multipleMatches = limitedContacts
                     )
                 }
                 speechManager?.speak(spokenPrompt, language) {
@@ -363,6 +459,10 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun selectContactToCall(contact: Contact, selectedPhone: String? = null) {
+        if (AssistantServiceBridge.serviceState.value.isServiceRunning) {
+            AssistantServiceBridge.postAction(ServiceUserAction.SelectContact(contact, selectedPhone))
+            return
+        }
         commandTimeoutJob?.cancel()
         val phoneNumber = selectedPhone ?: contact.primaryPhoneNumber
         val lang = lastDetectedLanguage
@@ -378,6 +478,10 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun selectOptionToCall(option: PhoneNumberOption) {
+        if (AssistantServiceBridge.serviceState.value.isServiceRunning) {
+            AssistantServiceBridge.postAction(ServiceUserAction.SelectOption(option))
+            return
+        }
         commandTimeoutJob?.cancel()
         val lang = lastDetectedLanguage
         if (option.number.isNotEmpty()) {
@@ -429,6 +533,10 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun returnToWakeListening() {
+        if (AssistantServiceBridge.serviceState.value.isServiceRunning) {
+            AssistantServiceBridge.postAction(ServiceUserAction.ReturnToWakeListening)
+            return
+        }
         commandTimeoutJob?.cancel()
         val wakePrompt = LanguageManager.getWakeIdlePrompt(_uiState.value.wakeName, _uiState.value.selectedLanguage)
         _uiState.update {
@@ -451,7 +559,8 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     fun updatePermissionsState(granted: Boolean) {
         _uiState.update { it.copy(hasAllPermissions = granted) }
         if (granted) {
-            if (_uiState.value.isHandsFreeEnabled) {
+            startForegroundServiceIfAllowed()
+            if (!AssistantServiceBridge.serviceState.value.isServiceRunning && _uiState.value.isHandsFreeEnabled) {
                 returnToWakeListening()
             }
         } else {
@@ -461,6 +570,16 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                     listeningMode = AssistantListeningMode.INACTIVE,
                     responseText = "Microphone, Contacts, and Call permissions are required."
                 )
+            }
+        }
+    }
+
+    fun startForegroundServiceIfAllowed() {
+        if (_uiState.value.hasAllPermissions) {
+            try {
+                AssistantForegroundService.startService(context)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not start AssistantForegroundService", e)
             }
         }
     }
@@ -478,7 +597,12 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
         wakeName: String,
         voiceGender: VoiceGender,
         language: SupportedLanguage = _uiState.value.selectedLanguage,
-        isHandsFree: Boolean = true
+        isHandsFree: Boolean = true,
+        availabilityMode: AssistantAvailabilityMode = _uiState.value.availabilityMode,
+        scheduleStartHour: Int = _uiState.value.scheduleStartHour,
+        scheduleStartMinute: Int = _uiState.value.scheduleStartMinute,
+        scheduleEndHour: Int = _uiState.value.scheduleEndHour,
+        scheduleEndMinute: Int = _uiState.value.scheduleEndMinute
     ) {
         val safeName = name.trim().ifEmpty { "VirJoy Assistant" }
         val safeWakeName = wakeName.trim().ifEmpty { safeName }
@@ -489,6 +613,11 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
             .putString("voice_gender", voiceGender.name)
             .putString("selected_language", language.name)
             .putBoolean("is_handsfree_enabled", isHandsFree)
+            .putString("availability_mode", availabilityMode.name)
+            .putInt("schedule_start_hour", scheduleStartHour)
+            .putInt("schedule_start_minute", scheduleStartMinute)
+            .putInt("schedule_end_hour", scheduleEndHour)
+            .putInt("schedule_end_minute", scheduleEndMinute)
             .apply()
 
         speechManager?.updateVoiceGender(voiceGender)
@@ -505,16 +634,48 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                 selectedLanguage = language,
                 currentLanguage = language,
                 isHandsFreeEnabled = isHandsFree,
+                availabilityMode = availabilityMode,
+                scheduleStartHour = scheduleStartHour,
+                scheduleStartMinute = scheduleStartMinute,
+                scheduleEndHour = scheduleEndHour,
+                scheduleEndMinute = scheduleEndMinute,
                 responseText = newPrompt,
                 isSettingsOpen = false
             )
         }
 
-        if (_uiState.value.hasAllPermissions && isHandsFree) {
-            speechManager?.startWakeListening(language)
-        } else {
-            speechManager?.stopListening()
+        // Notify running foreground service of new configuration
+        AssistantServiceBridge.postAction(ServiceUserAction.ReloadSettings)
+        startForegroundServiceIfAllowed()
+
+        if (!AssistantServiceBridge.serviceState.value.isServiceRunning) {
+            if (_uiState.value.hasAllPermissions && isHandsFree) {
+                speechManager?.startWakeListening(language)
+            } else {
+                speechManager?.stopListening()
+            }
         }
+    }
+
+    fun saveSettings(
+        name: String,
+        wakeName: String,
+        voiceGender: VoiceGender,
+        language: SupportedLanguage,
+        isHandsFree: Boolean
+    ) {
+        saveSettings(
+            name = name,
+            wakeName = wakeName,
+            voiceGender = voiceGender,
+            language = language,
+            isHandsFree = isHandsFree,
+            availabilityMode = _uiState.value.availabilityMode,
+            scheduleStartHour = _uiState.value.scheduleStartHour,
+            scheduleStartMinute = _uiState.value.scheduleStartMinute,
+            scheduleEndHour = _uiState.value.scheduleEndHour,
+            scheduleEndMinute = _uiState.value.scheduleEndMinute
+        )
     }
 
     fun saveSettings(name: String, voiceGender: VoiceGender, language: SupportedLanguage) {

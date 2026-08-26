@@ -6,10 +6,10 @@ import java.util.Locale
 
 object DisambiguationResolver {
 
-    private val OPTION_1_REGEX = Regex("""(^|\D)(1|১|one|ek|প্রথম|প্রথমটি|প্রথমটা|पहला|first|1st|option 1|number 1|opt 1|এক নম্বর|১ নম্বর|1 নম্বর|এক নাম্বার|১ নাম্বার|1 নাম্বার|एक नंबर)(\D|$)""", RegexOption.IGNORE_CASE)
-    private val OPTION_2_REGEX = Regex("""(^|\D)(2|২|two|do|দ্বিতীয়|দ্বিতীয়|দ্বিতীয়টি|দ্বিতীয়টি|दूसरा|second|2nd|option 2|number 2|opt 2|দুই নম্বর|২ নম্বর|2 নম্বর|দুই নাম্বার|২ নাম্বার|2 নাম্বার|दो नंबर)(\D|$)""", RegexOption.IGNORE_CASE)
-    private val OPTION_3_REGEX = Regex("""(^|\D)(3|৩|three|teen|তৃতীয়|তৃতীয়|তৃতীয়টি|तीसरा|third|3rd|option 3|number 3|opt 3|তিন নম্বর|৩ নম্বর|3 নম্বর|তিন নাম্বার|৩ নাম্বার|3 নাম্বার|तीन नंबर)(\D|$)""", RegexOption.IGNORE_CASE)
-    private val OPTION_4_REGEX = Regex("""(^|\D)(4|৪|four|chaar|চতুর্থ|चौथा|fourth|4th|option 4|number 4|opt 4|চার নম্বর|৪ নম্বর|4 নম্বর|চার নাম্বার|৪ নাম্বার|4 নাম্বার|चार नंबर)(\D|$)""", RegexOption.IGNORE_CASE)
+    private val OPTION_1_REGEX = Regex("""(^|\D)(1|১|one|ek|প্রথম|প্রথমটি|প্রথমটা|পহলে|पहला|पहले|first|1st|option 1|number 1|opt 1|এক নম্বর|১ নম্বর|1 নম্বর|এক নাম্বার|১ নাম্বার|1 নাম্বার|एक नंबर|yes|yeah|yep|haan|haa|হ্যাঁ|হ্যা|হাঁ|हाँ|हां)(\D|$)""", RegexOption.IGNORE_CASE)
+    private val OPTION_2_REGEX = Regex("""(^|\D)(2|২|two|do|দ্বিতীয়|দ্বিতীয়|দ্বিতীয়টি|দ্বিতীয়টি|दूसरा|दुसरे|second|2nd|option 2|number 2|opt 2|দুই নম্বর|২ নম্বর|2 নম্বর|দুই নাম্বার|২ নাম্বার|2 নাম্বার|दो नंबर|no|nope|na|nah|না|নাহ|না না|ना|नहीं)(\D|$)""", RegexOption.IGNORE_CASE)
+    private val OPTION_3_REGEX = Regex("""(^|\D)(3|৩|three|teen|তৃতীয়|তৃতীয়|তৃতীয়টি|तीसरा|तीसरे|third|3rd|option 3|number 3|opt 3|তিন নম্বর|৩ নম্বর|3 নম্বর|তিন নাম্বার|৩ নাম্বার|3 নাম্বার|तीन नंबर)(\D|$)""", RegexOption.IGNORE_CASE)
+    private val OPTION_4_REGEX = Regex("""(^|\D)(4|৪|four|chaar|char|চতুর্থ|चौथा|चौथे|fourth|4th|option 4|number 4|opt 4|চার নম্বর|৪ নম্বর|4 নম্বর|চার নাম্বার|৪ নাম্বার|4 নাম্বার|चार नंबर)(\D|$)""", RegexOption.IGNORE_CASE)
 
     /**
      * Resolves the user's spoken answer to one of the provided phone number options.
@@ -99,28 +99,28 @@ object DisambiguationResolver {
         if (spoken.contains(label)) return true
 
         // Mobile
-        if (label.contains("mobile") || label.contains("মোবাইল") || label.contains("मोबाइल")) {
+        if (label.contains("mobile") || label.contains("মোবাইল") || label.contains("मोबाइल") || label.contains("phone") || label.contains("ফোন") || label.contains("फोन")) {
             if (spoken.contains("mobile") || spoken.contains("মোবাইল") || spoken.contains("मोबाइल") ||
                 spoken.contains("mob") || spoken.contains("মবাইল") || spoken.contains("সেলফোন") ||
-                spoken.contains("cell")
+                spoken.contains("cell") || spoken.contains("phone") || spoken.contains("ফোন") || spoken.contains("फोन")
             ) {
                 return true
             }
         }
 
         // Office / Work
-        if (label.contains("work") || label.contains("office") || label.contains("অফিস") || label.contains("ऑफिस") || label.contains("काम")) {
+        if (label.contains("work") || label.contains("office") || label.contains("অফিস") || label.contains("ऑफिस") || label.contains("काम") || label.contains("কাজ")) {
             if (spoken.contains("office") || spoken.contains("অফিস") || spoken.contains("ऑफिस") ||
-                spoken.contains("work") || spoken.contains("কাজ") || spoken.contains("কাম")
+                spoken.contains("work") || spoken.contains("কাজ") || spoken.contains("কাম") || spoken.contains("daftar")
             ) {
                 return true
             }
         }
 
         // Home
-        if (label.contains("home") || label.contains("বাড়ি") || label.contains("घर") || label.contains("ঘর")) {
+        if (label.contains("home") || label.contains("বাড়ি") || label.contains("বাড়ি") || label.contains("घर") || label.contains("ঘর")) {
             if (spoken.contains("home") || spoken.contains("বাড়ি") || spoken.contains("বাড়ি") ||
-                spoken.contains("ঘর") || spoken.contains("घर")
+                spoken.contains("ঘর") || spoken.contains("घर") || spoken.contains("makaan") || spoken.contains("বাসা")
             ) {
                 return true
             }

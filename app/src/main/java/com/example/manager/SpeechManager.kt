@@ -41,6 +41,7 @@ class SpeechManager(
     private var isContinuousListeningEnabled: Boolean = true
     private var isDestroyed: Boolean = false
     private var isSystemMutedForWake: Boolean = false
+    private var currentTtsCompletionCallback: (() -> Unit)? = null
 
     init {
         initTts()
@@ -77,8 +78,6 @@ class SpeechManager(
             }
         }
     }
-
-    private var currentTtsCompletionCallback: (() -> Unit)? = null
 
     fun updateLanguage(language: SupportedLanguage) {
         currentLanguage = language
@@ -192,14 +191,30 @@ class SpeechManager(
     }
 
     /**
+     * Immediately stops active speech and clears pending TTS callbacks.
+     */
+    fun stopSpeaking() {
+        isSpeaking = false
+        currentTtsCompletionCallback = null
+        try {
+            textToSpeech?.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error stopping TTS", e)
+        }
+    }
+
+    /**
      * Speaks text using the configured voice profile and notifies completion.
+     * Uses QUEUE_FLUSH to cancel any prior utterances and enables immediate interruption.
      */
     fun speak(
         text: String,
         language: SupportedLanguage = currentLanguage,
         onDone: (() -> Unit)? = null
     ) {
+        stopSpeaking()
         unmuteSystemAudio()
+
         if (!isTtsInitialized) {
             onDone?.invoke()
             return
@@ -209,10 +224,8 @@ class SpeechManager(
             return
         }
 
-        // Pause speech recognizer while speaking to prevent hearing oneself
-        pauseListeningTemporarily()
-
         currentTtsCompletionCallback = onDone
+        isSpeaking = true
 
         try {
             applyLanguageAndVoice(language, currentVoiceGender)
@@ -238,16 +251,6 @@ class SpeechManager(
         }
     }
 
-    private fun pauseListeningTemporarily() {
-        mainHandler.removeCallbacksAndMessages(null)
-        try {
-            speechRecognizer?.stopListening()
-            speechRecognizer?.cancel()
-        } catch (e: Exception) {
-            Log.w(TAG, "Error pausing recognizer", e)
-        }
-    }
-
     fun startWakeListening(language: SupportedLanguage = currentLanguage) {
         isWakeMode = true
         startListeningInternal(language)
@@ -265,10 +268,6 @@ class SpeechManager(
 
     private fun startListeningInternal(language: SupportedLanguage) {
         if (isDestroyed) return
-        if (isSpeaking) {
-            Log.d(TAG, "Postponing listening while TTS is speaking")
-            return
-        }
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             onError("Speech recognition is not available on this device.")
             return
@@ -310,7 +309,6 @@ class SpeechManager(
                                 error == SpeechRecognizer.ERROR_CLIENT
 
                         if (isWakeMode && isContinuousListeningEnabled && isTransient && !isDestroyed) {
-                            // In hands-free wake mode, silently and calmly re-arm listening
                             scheduleRestartListening(language, 800L)
                         } else {
                             val errorMessage = when (error) {
@@ -334,6 +332,10 @@ class SpeechManager(
                         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         if (!matches.isNullOrEmpty()) {
                             val recognized = matches[0]
+                            // If user spoke during TTS, stop TTS immediately (interruptibility)
+                            if (isSpeaking) {
+                                stopSpeaking()
+                            }
                             onSpeechResult(recognized)
                         } else {
                             if (isWakeMode && isContinuousListeningEnabled && !isDestroyed) {
@@ -344,7 +346,17 @@ class SpeechManager(
                         }
                     }
 
-                    override fun onPartialResults(partialResults: Bundle?) {}
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        if (!matches.isNullOrEmpty()) {
+                            val partial = matches[0]
+                            // Check if user spoke an immediate stop phrase during TTS
+                            if (isSpeaking && LanguageManager.isCancelOrStopPhrase(partial)) {
+                                stopSpeaking()
+                                onSpeechResult(partial)
+                            }
+                        }
+                    }
 
                     override fun onEvent(eventType: Int, params: Bundle?) {}
                 })
@@ -377,10 +389,10 @@ class SpeechManager(
     }
 
     fun scheduleRestartListening(language: SupportedLanguage = currentLanguage, delayMs: Long = 800L) {
-        if (isDestroyed || !isContinuousListeningEnabled || isSpeaking) return
+        if (isDestroyed || !isContinuousListeningEnabled) return
         mainHandler.removeCallbacksAndMessages(null)
         mainHandler.postDelayed({
-            if (!isDestroyed && !isSpeaking) {
+            if (!isDestroyed) {
                 if (isWakeMode) {
                     startWakeListening(language)
                 } else {
@@ -424,4 +436,3 @@ class SpeechManager(
         }
     }
 }
-

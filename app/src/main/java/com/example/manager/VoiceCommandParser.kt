@@ -54,6 +54,28 @@ object VoiceCommandParser {
             }
         }
 
+        // 2. Mixed language & Cross-language calling patterns (e.g., "বাবুকে call করো", "पहले बाबুকে কল করো", "first rahul ko call karo")
+        val mixedCallingKeywords = "call|phone|dial|ring|কল|ফোন|ডায়াল|কॉल|कॉल|फोन|डायल|કોલ|ફોન|ਕਾਲ|ਫ਼ੋਨ|କଲ୍|ଫୋନ୍|போன்|கால்|కాల్|ఫోన్|ಕರೆ|ಕಾಲ್|ಫೋನ್|കോൾ|ഫോൺ|کال|فون"
+        val mixedVerbKeywords = "করো|কর|করুন|কৰক|কৰা|লাগাও|দাও|दीजिए|করিয়ে|करो|करें|कीजिए|लगाओ|मिलाओ|करा|lava|lavao|कर|કરો|લગાવો|ਕਰੋ|ਲਗਾਓ|କରନ୍ତୁ|କର|செய்|பண்ணு|பண்ணுங்க|చేయి|చెయ్యి|చేయండి|ಮಾಡಿ|ಮಾಡು|ചെയ്യുക|کرو|کریں|لگائیں|koro|karo|lagao|daao|dao|dalo"
+        val mixedPrefixFillers = "(?:please\\s+|make\\s+a\\s+|can\\s+you\\s+|could\\s+you\\s+|দয়া\\s+করে\\s+|দয়া\\s+করে\\s+|দয়া\\s+কৰি\\s+|একটু\\s+|একবার\\s+|कृपया\\s+|जरा\\s+|एक\\s+बार\\s+|পহলে\\s+|पहले\\s+|पहला\\s+|first\\s+|firstly\\s+|প্রথমেই\\s+|প্রথমে\\s+|pehla\\s+|pehle\\s+)?"
+
+        val mixedPatterns = listOf(
+            Regex("(?i)^$mixedPrefixFillers(.+?)\\s+(?:$mixedCallingKeywords)(?:\\s+(?:$mixedVerbKeywords))?(?:\\s+please)?$"),
+            Regex("(?i)^$mixedPrefixFillers(?:$mixedCallingKeywords)(?:\\s+(?:$mixedVerbKeywords))?\\s+(?:to\\s+)?(.+?)(?:\\s+please)?$"),
+            Regex("(?i)^$mixedPrefixFillers(.+?)\\s+(?:$mixedCallingKeywords)$")
+        )
+
+        for (pattern in mixedPatterns) {
+            val match = pattern.matchEntire(trimmed)
+            if (match != null) {
+                val target = match.groupValues[1].trim()
+                val cleaned = BengaliHindiEnglishMatcher.cleanContactQuery(target)
+                if (cleaned.isNotEmpty()) {
+                    return ParsedVoiceCommand.CallContact(cleaned, detectedLanguage)
+                }
+            }
+        }
+
         // 2. Bengali patterns (e.g. "রাহুলকে ফোন করো", "রাহুলকে কল কর", "রাহুলকে কল দাও", "রাহুলকে ফোন দাও", "কল করো রাহুলকে")
         val bengaliPatterns = listOf(
             Regex("^(.+?)\\s+(?:কল|ফোন|ডায়াল)\\s*(?:করো|কর|করুন|লাগাও|দাও)$"),

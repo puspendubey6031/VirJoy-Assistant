@@ -606,9 +606,17 @@ object BengaliHindiEnglishMatcher {
     fun cleanContactQuery(raw: String): String {
         var text = raw.trim()
 
+        // Leading conversational fillers / sequence words
+        text = text.replace(Regex("(?i)^(?:please|first|firstly|can\\s+you\\s+call|could\\s+you\\s+call|pehle|pehla|ekto|ekbar)\\s+"), "")
+        text = text.replace(Regex("^(?:দয়া\\s+করে|দয়া\\s+করে|দয়া\\s+কৰি|একটু|একবার|প্রথমে|প্রথমেই|পহলে|पहले|पहला|कृपया|जरा|एक\\s+बार)\\s+"), "")
+
         // English command prefixes/suffixes
         text = text.replace(Regex("(?i)^(?:please\\s+)?(?:make\\s+a\\s+)?(?:call|phone|dial|ring)\\s+(?:to\\s+)?"), "")
         text = text.replace(Regex("(?i)\\s+(?:please|now)$"), "")
+
+        // Mixed/Cross-language verb suffixes and keywords (e.g. "call koro", "call karo", "phone lagao", "call dao")
+        text = text.replace(Regex("(?i)\\s+(?:call|phone|dial|ring)\\s*(?:koro|karo|lagao|daao|dao|kora|kori)?$"), "")
+        text = text.replace(Regex("(?i)^(?:call|phone|dial|ring)\\s*(?:koro|karo|lagao|daao|dao|kora|kori)?\\s+"), "")
 
         // Bengali & Assamese verb words & prefixes
         text = text.replace(Regex("^(?:কল|ফোন|ডায়াল)\\s*(?:করো|কর|করুন|কৰক|কৰা|লাগাও|দাও)\\s*"), "")
@@ -650,7 +658,8 @@ object BengaliHindiEnglishMatcher {
         text = text.replace(Regex("^(?:کال|فون)\\s*(?:کرو|کریں|لگائیں)\\s*"), "")
         text = text.replace(Regex("\\s*(?:کال|فون)\\s*(?:کرو|کریں|لگائیں)$"), "")
 
-        // Strip standalone postpositions
+        // Strip standalone postpositions (both Indic and Romanized)
+        text = text.replace(Regex("(?i)\\s+(?:ko|ke|er|re|ra|ku|ki)$"), "")
         text = text.replace(Regex("\\s+(?:को|ला|यांना|ने|ਨੂੰ|ଙ୍କୁ|କୁ|కి|కు|ಅವರಿಗೆ|ಗೆ|ന്|நெ|க|লৈ|কো)$"), "")
 
         // Strip attached postposition suffixes
