@@ -447,20 +447,25 @@ class AssistantForegroundService : Service() {
     }
 
     private fun handleSpeechResult(rawText: String) {
-        // Immediate cancellation & stop handling
+        // Immediate cancellation & stop handling (Highest Priority: interrupt TTS & speech immediately)
         if (LanguageManager.isCancelOrStopPhrase(rawText)) {
             commandTimeoutJob?.cancel()
             speechManager?.stopSpeaking()
+            speechManager?.stopListening()
             val cancelledMsg = LanguageManager.getCancelledMessage(selectedLanguage)
+            currentListeningMode = AssistantListeningMode.WAKE_LISTENING
             AssistantServiceBridge.updateState {
                 it.copy(
+                    listeningMode = AssistantListeningMode.WAKE_LISTENING,
                     recognizedText = rawText,
                     responseText = cancelledMsg,
                     multipleMatches = emptyList(),
-                    disambiguationOptions = emptyList()
+                    disambiguationOptions = emptyList(),
+                    isListening = false,
+                    rmsLevel = 0f
                 )
             }
-            returnToWakeListeningDelayed(1000L)
+            evaluateAvailabilitySchedule()
             return
         }
 
@@ -631,7 +636,7 @@ class AssistantForegroundService : Service() {
                         contactName = c.name
                     )
                 }
-                val prompt = LanguageManager.formatMultiContactDisambiguationPrompt(options, language)
+                val prompt = LanguageManager.formatMultiContactDisambiguationPrompt(targetName, options, language)
                 currentListeningMode = AssistantListeningMode.DISAMBIGUATION_LISTENING
                 AssistantServiceBridge.updateState {
                     it.copy(
@@ -688,19 +693,28 @@ class AssistantForegroundService : Service() {
     }
 
     private fun initiateCall(contactName: String, phoneNumber: String, language: SupportedLanguage) {
+        commandTimeoutJob?.cancel()
+        speechManager?.stopSpeaking()
+        speechManager?.stopListening()
+
         val message = LanguageManager.getCallingMessage(contactName, language)
+        currentListeningMode = AssistantListeningMode.WAKE_LISTENING
         AssistantServiceBridge.updateState {
             it.copy(
+                listeningMode = AssistantListeningMode.WAKE_LISTENING,
+                recognizedText = "",
                 responseText = message,
                 multipleMatches = emptyList(),
-                disambiguationOptions = emptyList()
+                disambiguationOptions = emptyList(),
+                isListening = false,
+                rmsLevel = 0f
             )
-        }
-        speechManager?.speak(message, language) {
-            returnToWakeListeningDelayed(1000L)
         }
 
         val result = callManager.makePhoneCall(phoneNumber)
+        result.onSuccess {
+            evaluateAvailabilitySchedule()
+        }
         result.onFailure { error ->
             val errorMsg = LanguageManager.getCallFailedMessage(
                 contactName, error.localizedMessage ?: "Unknown error", language

@@ -422,12 +422,13 @@ class VoiceAndMatcherTest {
 
         val bengaliPrompt = LanguageManager.formatMultiNumberDisambiguationPrompt("Rahul", options, SupportedLanguage.BENGALI)
         assertTrue("Bengali prompt should contain contact name", bengaliPrompt.contains("Rahul"))
-        assertTrue("Bengali prompt should contain option 1", bengaliPrompt.contains("এক নম্বর"))
-        assertTrue("Bengali prompt should contain option 2", bengaliPrompt.contains("দুই নম্বর"))
+        assertTrue("Bengali prompt should contain option 1 with label", bengaliPrompt.contains("এক") && bengaliPrompt.contains("Mobile"))
+        assertTrue("Bengali prompt should contain option 2 with label", bengaliPrompt.contains("দুই") && bengaliPrompt.contains("Home"))
 
         val englishPrompt = LanguageManager.formatMultiNumberDisambiguationPrompt("Rahul", options, SupportedLanguage.ENGLISH)
         assertTrue("English prompt should contain contact name", englishPrompt.contains("Rahul"))
-        assertTrue("English prompt should contain 'Option 1'", englishPrompt.contains("Option 1"))
+        assertTrue("English prompt should contain option 1 with label", englishPrompt.contains("One") && englishPrompt.contains("Mobile"))
+        assertTrue("English prompt should contain option 2 with label", englishPrompt.contains("Two") && englishPrompt.contains("Home"))
     }
 
     @Test

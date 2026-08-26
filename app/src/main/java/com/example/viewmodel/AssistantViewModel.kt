@@ -224,21 +224,27 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun handleSpeechResult(rawText: String) {
-        // Immediate cancellation & stop handling
+        // Immediate cancellation & stop handling (Highest Priority: interrupt TTS & speech immediately)
         if (LanguageManager.isCancelOrStopPhrase(rawText)) {
             commandTimeoutJob?.cancel()
             speechManager?.stopSpeaking()
+            speechManager?.stopListening()
             val lang = _uiState.value.selectedLanguage
             val cancelledMsg = LanguageManager.getCancelledMessage(lang)
             _uiState.update {
                 it.copy(
+                    listeningMode = AssistantListeningMode.WAKE_LISTENING,
                     recognizedText = rawText,
                     responseText = cancelledMsg,
                     multipleMatches = emptyList(),
-                    disambiguationOptions = emptyList()
+                    disambiguationOptions = emptyList(),
+                    isListening = false,
+                    rmsLevel = 0f
                 )
             }
-            returnToWakeListeningDelayed(1000L)
+            if (_uiState.value.hasAllPermissions && _uiState.value.isHandsFreeEnabled) {
+                speechManager?.startWakeListening(_uiState.value.selectedLanguage)
+            }
             return
         }
 
@@ -424,6 +430,7 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 }
                 val spokenPrompt = LanguageManager.formatMultiContactDisambiguationPrompt(
+                    targetName,
                     options,
                     language
                 )
@@ -490,19 +497,29 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun initiateCall(contactName: String, phoneNumber: String, language: SupportedLanguage) {
+        commandTimeoutJob?.cancel()
+        speechManager?.stopSpeaking()
+        speechManager?.stopListening()
+
         val message = LanguageManager.getCallingMessage(contactName, language)
         _uiState.update {
             it.copy(
+                listeningMode = AssistantListeningMode.WAKE_LISTENING,
+                recognizedText = "",
                 responseText = message,
                 multipleMatches = emptyList(),
-                disambiguationOptions = emptyList()
+                disambiguationOptions = emptyList(),
+                isListening = false,
+                rmsLevel = 0f
             )
-        }
-        speechManager?.speak(message, language) {
-            returnToWakeListeningDelayed(1000L)
         }
 
         val result = callManager.makePhoneCall(phoneNumber)
+        result.onSuccess {
+            if (_uiState.value.hasAllPermissions && _uiState.value.isHandsFreeEnabled) {
+                speechManager?.startWakeListening(_uiState.value.selectedLanguage)
+            }
+        }
         result.onFailure { error ->
             val errorMsg = LanguageManager.getCallFailedMessage(
                 contactName,
