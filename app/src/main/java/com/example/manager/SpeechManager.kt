@@ -40,7 +40,7 @@ class SpeechManager(
     private var isWakeMode: Boolean = true
     private var isContinuousListeningEnabled: Boolean = true
     private var isDestroyed: Boolean = false
-    private var isSystemMutedForWake: Boolean = false
+    private var isCallActive: Boolean = false
     private var currentTtsCompletionCallback: (() -> Unit)? = null
 
     init {
@@ -96,28 +96,22 @@ class SpeechManager(
         }
     }
 
-    private fun muteForSilentWakeListening() {
-        if (isWakeMode && !isSystemMutedForWake) {
-            try {
-                audioManager?.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_MUTE, 0)
-                audioManager?.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0)
-                isSystemMutedForWake = true
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not mute notification stream", e)
-            }
+    fun setCallActive(active: Boolean) {
+        isCallActive = active
+        if (active) {
+            stopListening()
         }
     }
 
+    fun isCallActive(): Boolean = isCallActive
+
+    private fun muteForSilentWakeListening() {
+        // True no-op: Passive wake listening is silent by design (no chimes/beeps emitted)
+        // Never alter system, notification, ringtone, media, or alarm volumes.
+    }
+
     private fun unmuteSystemAudio() {
-        if (isSystemMutedForWake) {
-            try {
-                audioManager?.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_UNMUTE, 0)
-                audioManager?.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0)
-                isSystemMutedForWake = false
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not unmute notification stream", e)
-            }
-        }
+        // True no-op: Never mutate device audio streams.
     }
 
     private fun applyLanguageAndVoice(language: SupportedLanguage, gender: VoiceGender) {
@@ -267,7 +261,7 @@ class SpeechManager(
     }
 
     private fun startListeningInternal(language: SupportedLanguage) {
-        if (isDestroyed) return
+        if (isDestroyed || isCallActive) return
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             onError("Speech recognition is not available on this device.")
             return
@@ -308,7 +302,7 @@ class SpeechManager(
                                 error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
                                 error == SpeechRecognizer.ERROR_CLIENT
 
-                        if (isWakeMode && isContinuousListeningEnabled && isTransient && !isDestroyed) {
+                        if (isWakeMode && isContinuousListeningEnabled && isTransient && !isDestroyed && !isCallActive) {
                             scheduleRestartListening(language, 800L)
                         } else {
                             val errorMessage = when (error) {
@@ -338,7 +332,7 @@ class SpeechManager(
                             }
                             onSpeechResult(recognized)
                         } else {
-                            if (isWakeMode && isContinuousListeningEnabled && !isDestroyed) {
+                            if (isWakeMode && isContinuousListeningEnabled && !isDestroyed && !isCallActive) {
                                 scheduleRestartListening(language, 800L)
                             } else {
                                 onError("No speech recognized.")
@@ -369,9 +363,9 @@ class SpeechManager(
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, language.code)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language.code)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 10000L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
                 putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf(
                     "bn-IN", "hi-IN", "en-IN", "te-IN", "mr-IN", "ta-IN", "gu-IN", "kn-IN", "ml-IN", "pa-IN", "or-IN", "as-IN", "ur-IN"
                 ))
@@ -380,7 +374,7 @@ class SpeechManager(
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
             onListeningStateChanged(false)
-            if (isWakeMode && isContinuousListeningEnabled && !isDestroyed) {
+            if (isWakeMode && isContinuousListeningEnabled && !isDestroyed && !isCallActive) {
                 scheduleRestartListening(language, 1000L)
             } else {
                 onError("Failed to start speech recognizer: ${e.localizedMessage}")
@@ -389,10 +383,10 @@ class SpeechManager(
     }
 
     fun scheduleRestartListening(language: SupportedLanguage = currentLanguage, delayMs: Long = 800L) {
-        if (isDestroyed || !isContinuousListeningEnabled) return
+        if (isDestroyed || !isContinuousListeningEnabled || isCallActive) return
         mainHandler.removeCallbacksAndMessages(null)
         mainHandler.postDelayed({
-            if (!isDestroyed) {
+            if (!isDestroyed && !isCallActive) {
                 if (isWakeMode) {
                     startWakeListening(language)
                 } else {

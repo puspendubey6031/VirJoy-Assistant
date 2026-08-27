@@ -28,62 +28,93 @@ object DisambiguationResolver {
         val cleanSpoken = spokenText.trim().lowercase(Locale.ROOT)
         if (cleanSpoken.isEmpty()) return null
 
-        // 1. Check last 4 digits match first (converting Indic digits to ASCII)
-        val normalizedSpokenDigits = normalizeDigits(cleanSpoken)
-        if (normalizedSpokenDigits.length >= 3) {
+        val isMultipleDistinctContacts = options.map { it.contactName.trim().lowercase(Locale.ROOT) }.distinct().size > 1
+
+        if (isMultipleDistinctContacts) {
+            // === MULTIPLE DISTINCT CONTACTS RESOLUTION ===
+            // 1. Ordinal / Option index match (e.g. "১", "এক নম্বর", "first", "two", "দ্বিতীয়", etc.)
+            val optionIndex = extractOptionIndex(cleanSpoken)
+            if (optionIndex != null) {
+                val matchedByIndex = options.firstOrNull { it.optionIndex == optionIndex }
+                if (matchedByIndex != null) return matchedByIndex
+            }
+
+            // 2. Actual contact name match (e.g. "প্রশান্ত দাস", "গোড়াই")
+            var bestNameMatch: PhoneNumberOption? = null
+            var bestScore = 0.0
             for (opt in options) {
-                val optDigits = normalizeDigits(opt.lastFourDigits)
-                if (optDigits.length >= 2 && normalizedSpokenDigits.contains(optDigits)) {
+                val nameLower = opt.contactName.lowercase(Locale.ROOT)
+                val score = BengaliHindiEnglishMatcher.computeMatchScore(cleanSpoken, nameLower)
+                if (score >= 0.65 && score > bestScore) {
+                    bestScore = score
+                    bestNameMatch = opt
+                }
+            }
+            if (bestNameMatch != null) {
+                return bestNameMatch
+            }
+
+            // 3. Fallback: If 2 options and user said "first" / "last" / "second"
+            if (options.size == 2) {
+                if (cleanSpoken.contains("first") || cleanSpoken.contains("প্রথম") || cleanSpoken.contains("पहला") || cleanSpoken.contains("1st")) {
+                    return options[0]
+                }
+                if (cleanSpoken.contains("second") || cleanSpoken.contains("দ্বিতীয়") || cleanSpoken.contains("দ্বিতীয়") || cleanSpoken.contains("दूसरा") || cleanSpoken.contains("2nd") || cleanSpoken.contains("last")) {
+                    return options[1]
+                }
+            }
+
+            return null
+        } else {
+            // === SINGLE CONTACT WITH MULTIPLE PHONE NUMBERS ===
+            // 1. Ordinal / Option index match
+            val optionIndex = extractOptionIndex(cleanSpoken)
+            if (optionIndex != null) {
+                val matchedByIndex = options.firstOrNull { it.optionIndex == optionIndex }
+                if (matchedByIndex != null) return matchedByIndex
+            }
+
+            // 2. Phone label match (Mobile, Office, Home, Work)
+            for (opt in options) {
+                val labelLower = opt.label.lowercase(Locale.ROOT)
+                if (labelLower.isNotEmpty() && matchesLabel(cleanSpoken, labelLower)) {
                     return opt
                 }
             }
-        }
 
-        // 2. Direct index check from number words with boundaries
-        val optionIndex = extractOptionIndex(cleanSpoken)
-        if (optionIndex != null) {
-            val matchedByIndex = options.firstOrNull { it.optionIndex == optionIndex }
-            if (matchedByIndex != null) return matchedByIndex
-        }
-
-        // 3. Check label matches
-        for (opt in options) {
-            val labelLower = opt.label.lowercase(Locale.ROOT)
-            if (labelLower.isNotEmpty() && matchesLabel(cleanSpoken, labelLower)) {
-                return opt
-            }
-        }
-
-        // 4. Check contact name matches (for multi-contact disambiguation)
-        for (opt in options) {
-            val nameLower = opt.contactName.lowercase(Locale.ROOT)
-            val score = BengaliHindiEnglishMatcher.computeMatchScore(cleanSpoken, nameLower)
-            if (score >= 0.65) {
-                return opt
-            }
-        }
-
-        // 5. Fallback check for shorter digits
-        if (normalizedSpokenDigits.isNotEmpty()) {
-            for (opt in options) {
-                val optDigits = normalizeDigits(opt.lastFourDigits)
-                if (optDigits.length >= 2 && normalizedSpokenDigits.contains(optDigits)) {
-                    return opt
+            // 3. Last 4 digits match (converting Indic/Arabic digits)
+            val normalizedSpokenDigits = normalizeDigits(cleanSpoken)
+            if (normalizedSpokenDigits.length >= 3) {
+                for (opt in options) {
+                    val optDigits = normalizeDigits(opt.lastFourDigits)
+                    if (optDigits.length >= 2 && normalizedSpokenDigits.contains(optDigits)) {
+                        return opt
+                    }
                 }
             }
-        }
 
-        // Fallback: If only 2 options and user said "first" / "last"
-        if (options.size == 2) {
-            if (cleanSpoken.contains("first") || cleanSpoken.contains("প্রথম") || cleanSpoken.contains("पहला") || cleanSpoken.contains("1st")) {
-                return options[0]
+            // 4. Fallback check for 2-digit match
+            if (normalizedSpokenDigits.isNotEmpty()) {
+                for (opt in options) {
+                    val optDigits = normalizeDigits(opt.lastFourDigits)
+                    if (optDigits.length >= 2 && normalizedSpokenDigits.contains(optDigits)) {
+                        return opt
+                    }
+                }
             }
-            if (cleanSpoken.contains("second") || cleanSpoken.contains("দ্বিতীয়") || cleanSpoken.contains("দ্বিতীয়") || cleanSpoken.contains("दूसरा") || cleanSpoken.contains("2nd") || cleanSpoken.contains("last")) {
-                return options[1]
-            }
-        }
 
-        return null
+            // 5. Fallback for 2 options: "first" / "second"
+            if (options.size == 2) {
+                if (cleanSpoken.contains("first") || cleanSpoken.contains("প্রথম") || cleanSpoken.contains("पहला") || cleanSpoken.contains("1st")) {
+                    return options[0]
+                }
+                if (cleanSpoken.contains("second") || cleanSpoken.contains("দ্বিতীয়") || cleanSpoken.contains("দ্বিতীয়") || cleanSpoken.contains("दूसरा") || cleanSpoken.contains("2nd") || cleanSpoken.contains("last")) {
+                    return options[1]
+                }
+            }
+
+            return null
+        }
     }
 
     private fun extractOptionIndex(text: String): Int? {

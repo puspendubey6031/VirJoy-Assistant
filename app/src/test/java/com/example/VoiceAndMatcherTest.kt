@@ -715,4 +715,40 @@ class VoiceAndMatcherTest {
         // Fourth option must be excluded to enforce maximum 3 limit
         assertTrue(!promptBengali.contains("User Four"))
     }
+
+    @Test
+    fun testMultiContactDisambiguationResolution_PrioritizesIndexAndName() {
+        val options = listOf(
+            com.example.model.PhoneNumberOption(
+                number = "+919876511111",
+                label = "",
+                lastFourDigits = "",
+                optionIndex = 1,
+                contactName = "Prasanta Das"
+            ),
+            com.example.model.PhoneNumberOption(
+                number = "+919876522222",
+                label = "",
+                lastFourDigits = "",
+                optionIndex = 2,
+                contactName = "Prasanta Gorai"
+            )
+        )
+
+        // Resolves by ordinal "১" / "প্রথমটি"
+        val match1 = com.example.manager.DisambiguationResolver.resolveOption("১ নম্বর", options, SupportedLanguage.BENGALI)
+        assertEquals(1, match1?.optionIndex)
+        assertEquals("Prasanta Das", match1?.contactName)
+
+        val match2 = com.example.manager.DisambiguationResolver.resolveOption("দ্বিতীয় জন", options, SupportedLanguage.BENGALI)
+        assertEquals(2, match2?.optionIndex)
+        assertEquals("Prasanta Gorai", match2?.contactName)
+
+        // Resolves by contact surname / name
+        val matchName1 = com.example.manager.DisambiguationResolver.resolveOption("দাস", options, SupportedLanguage.BENGALI)
+        assertEquals(1, matchName1?.optionIndex)
+
+        val matchName2 = com.example.manager.DisambiguationResolver.resolveOption("গোড়াই", options, SupportedLanguage.BENGALI)
+        assertEquals(2, matchName2?.optionIndex)
+    }
 }

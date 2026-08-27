@@ -12,6 +12,9 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.telephony.PhoneStateListener
+import android.telephony.TelephonyCallback
+import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
@@ -97,6 +100,11 @@ class AssistantForegroundService : Service() {
     private var currentLanguage: SupportedLanguage = SupportedLanguage.ENGLISH
     private var commandTimeoutJob: Job? = null
 
+    private var telephonyManager: TelephonyManager? = null
+    private var isCallActive = false
+    private var telephonyCallback: Any? = null
+    private var phoneStateListener: Any? = null
+
     private val scheduleCheckRunnable = object : Runnable {
         override fun run() {
             evaluateAvailabilitySchedule()
@@ -113,6 +121,7 @@ class AssistantForegroundService : Service() {
         createNotificationChannel()
         loadSettingsFromPrefs()
         initSpeechManager()
+        registerCallStateListener()
 
         // Start Foreground immediately
         startForeground(NOTIFICATION_ID, buildForegroundNotification())
@@ -347,6 +356,11 @@ class AssistantForegroundService : Service() {
     }
 
     private fun evaluateAvailabilitySchedule() {
+        if (isCallActive) {
+            // Call active guard: Never start recognizer during active phone call
+            return
+        }
+
         val allowed = AssistantAvailabilityHelper.isListeningAllowed(
             mode = availabilityMode,
             startHour = scheduleStartHour,
@@ -381,6 +395,90 @@ class AssistantForegroundService : Service() {
             }
         }
         updateNotification()
+    }
+
+    private fun registerCallStateListener() {
+        try {
+            telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+                    override fun onCallStateChanged(state: Int) {
+                        onPhoneCallStateChanged(state)
+                    }
+                }
+                telephonyCallback = callback
+                telephonyManager?.registerTelephonyCallback(mainExecutor, callback)
+            } else {
+                @Suppress("DEPRECATION")
+                val listener = object : PhoneStateListener() {
+                    @Deprecated("Deprecated in Java")
+                    override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+                        onPhoneCallStateChanged(state)
+                    }
+                }
+                phoneStateListener = listener
+                @Suppress("DEPRECATION")
+                telephonyManager?.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register call state listener: ${e.localizedMessage}")
+        }
+    }
+
+    private fun unregisterCallStateListener() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (telephonyCallback as? TelephonyCallback)?.let {
+                    telephonyManager?.unregisterTelephonyCallback(it)
+                }
+                telephonyCallback = null
+            } else {
+                @Suppress("DEPRECATION")
+                (phoneStateListener as? PhoneStateListener)?.let {
+                    telephonyManager?.listen(it, PhoneStateListener.LISTEN_NONE)
+                }
+                phoneStateListener = null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error unregistering call state listener", e)
+        }
+    }
+
+    private fun onPhoneCallStateChanged(state: Int) {
+        when (state) {
+            TelephonyManager.CALL_STATE_OFFHOOK, TelephonyManager.CALL_STATE_RINGING -> {
+                isCallActive = true
+                speechManager?.setCallActive(true)
+            }
+            TelephonyManager.CALL_STATE_IDLE -> {
+                if (isCallActive) {
+                    isCallActive = false
+                    speechManager?.setCallActive(false)
+                    handleCallEndedResetAndResume()
+                }
+            }
+        }
+    }
+
+    private fun handleCallEndedResetAndResume() {
+        commandTimeoutJob?.cancel()
+        speechManager?.stopSpeaking()
+        speechManager?.stopListening()
+        currentListeningMode = AssistantListeningMode.WAKE_LISTENING
+
+        AssistantServiceBridge.updateState {
+            it.copy(
+                listeningMode = AssistantListeningMode.WAKE_LISTENING,
+                recognizedText = "",
+                responseText = LanguageManager.getWakeIdlePrompt(wakeName, selectedLanguage),
+                multipleMatches = emptyList(),
+                disambiguationOptions = emptyList(),
+                isListening = false,
+                rmsLevel = 0f
+            )
+        }
+
+        evaluateAvailabilitySchedule()
     }
 
     private fun startSilentWakeListening() {
@@ -622,16 +720,16 @@ class AssistantForegroundService : Service() {
                         startCommandTimeoutJob(12000L)
                     }
                 }
+                speechManager?.startCommandListening(language)
+                startCommandTimeoutJob(12000L)
             }
             is ContactMatchResult.MultipleMatches -> {
                 val limitedContacts = matchResult.contacts.take(3)
                 val options = limitedContacts.mapIndexed { idx, c ->
-                    val label = c.labeledPhoneNumbers.firstOrNull()?.label ?: "Mobile"
-                    val last4 = if (c.primaryPhoneNumber.length >= 4) c.primaryPhoneNumber.takeLast(4) else c.primaryPhoneNumber
                     PhoneNumberOption(
                         number = c.primaryPhoneNumber,
-                        label = label,
-                        lastFourDigits = last4,
+                        label = "",
+                        lastFourDigits = "",
                         optionIndex = idx + 1,
                         contactName = c.name
                     )
@@ -652,6 +750,8 @@ class AssistantForegroundService : Service() {
                         startCommandTimeoutJob(12000L)
                     }
                 }
+                speechManager?.startCommandListening(language)
+                startCommandTimeoutJob(12000L)
             }
             is ContactMatchResult.NoMatch -> {
                 val message = LanguageManager.getNoMatchMessage(targetName, language)
@@ -697,6 +797,9 @@ class AssistantForegroundService : Service() {
         speechManager?.stopSpeaking()
         speechManager?.stopListening()
 
+        isCallActive = true
+        speechManager?.setCallActive(true)
+
         val message = LanguageManager.getCallingMessage(contactName, language)
         currentListeningMode = AssistantListeningMode.WAKE_LISTENING
         AssistantServiceBridge.updateState {
@@ -713,9 +816,12 @@ class AssistantForegroundService : Service() {
 
         val result = callManager.makePhoneCall(phoneNumber)
         result.onSuccess {
-            evaluateAvailabilitySchedule()
+            // No-op here: Call is active. TelephonyManager CALL_STATE_IDLE will trigger
+            // clean reset and resume wake listening when the call finishes.
         }
         result.onFailure { error ->
+            isCallActive = false
+            speechManager?.setCallActive(false)
             val errorMsg = LanguageManager.getCallFailedMessage(
                 contactName, error.localizedMessage ?: "Unknown error", language
             )
@@ -743,6 +849,7 @@ class AssistantForegroundService : Service() {
 
     override fun onDestroy() {
         mainHandler.removeCallbacksAndMessages(null)
+        unregisterCallStateListener()
         serviceScope.cancel()
         speechManager?.destroy()
         speechManager = null

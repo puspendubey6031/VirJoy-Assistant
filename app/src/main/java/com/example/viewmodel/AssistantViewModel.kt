@@ -415,16 +415,16 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                         startCommandTimeoutJob(12000L)
                     }
                 }
+                speechManager?.startCommandListening(language)
+                startCommandTimeoutJob(12000L)
             }
             is ContactMatchResult.MultipleMatches -> {
                 val limitedContacts = matchResult.contacts.take(3)
                 val options = limitedContacts.mapIndexed { idx, c ->
-                    val label = c.labeledPhoneNumbers.firstOrNull()?.label ?: "Mobile"
-                    val last4 = if (c.primaryPhoneNumber.length >= 4) c.primaryPhoneNumber.takeLast(4) else c.primaryPhoneNumber
                     PhoneNumberOption(
                         number = c.primaryPhoneNumber,
-                        label = label,
-                        lastFourDigits = last4,
+                        label = "",
+                        lastFourDigits = "",
                         optionIndex = idx + 1,
                         contactName = c.name
                     )
@@ -448,6 +448,8 @@ class AssistantViewModel(application: Application) : AndroidViewModel(applicatio
                         startCommandTimeoutJob(12000L)
                     }
                 }
+                speechManager?.startCommandListening(language)
+                startCommandTimeoutJob(12000L)
             }
             is ContactMatchResult.NoMatch -> {
                 val message = LanguageManager.getNoMatchMessage(targetName, language)
