@@ -61,37 +61,35 @@ class SpeechManager(
         if (!isTtsInitialized) return
 
         try {
-            val locale = targetLocale ?: tts.language ?: Locale.getDefault()
-
+            val locale = targetLocale ?: tts.voice?.locale ?: Locale.getDefault()
             val voices = tts.voices.orEmpty()
 
-            val compatibleVoices = voices
-                .filter { voice ->
-                    voice.locale.language == locale.language &&
-                        !voice.isNetworkConnectionRequired
-                }
-                .sortedBy { voice ->
-                    when {
-                        voice.locale == locale -> 0
-                        voice.locale.language == locale.language -> 1
-                        else -> 2
-                    }
-                }
+            val localeVoices = voices.filter { voice ->
+                voice.locale.language == locale.language &&
+                    (locale.country.isEmpty() || voice.locale.country.isEmpty() ||
+                        voice.locale.country == locale.country)
+            }
+
+            val candidates = if (localeVoices.isNotEmpty()) {
+                localeVoices
+            } else {
+                voices.filter { it.locale.language == locale.language }
+            }
 
             val genderVoice = when (gender) {
                 VoiceGender.MALE -> {
-                    compatibleVoices.firstOrNull { voice ->
+                    candidates.firstOrNull { voice ->
                         val name = voice.name.lowercase(Locale.ROOT)
-
                         name.contains("male") &&
-                            !name.contains("female")
+                            !name.contains("female") &&
+                            !name.contains("woman") &&
+                            !name.contains("girl")
                     }
                 }
 
                 VoiceGender.FEMALE -> {
-                    compatibleVoices.firstOrNull { voice ->
+                    candidates.firstOrNull { voice ->
                         val name = voice.name.lowercase(Locale.ROOT)
-
                         name.contains("female") ||
                             name.contains("woman") ||
                             name.contains("girl")
@@ -101,17 +99,12 @@ class SpeechManager(
 
             if (genderVoice != null) {
                 tts.voice = genderVoice
-
-                Log.i(
-                    TAG,
-                    "Selected ${gender.name} voice: " +
-                        "${genderVoice.name} (${genderVoice.locale})"
-                )
+                Log.i(TAG, "Selected ${gender.name} TTS voice: ${genderVoice.name}")
             } else {
                 Log.w(
                     TAG,
-                    "No explicit ${gender.name} voice found for ${locale}. " +
-                        "Using compatible default voice."
+                    "No explicit ${gender.name} voice found for locale ${locale}. " +
+                        "Keeping the engine's current compatible voice."
                 )
             }
 
@@ -122,15 +115,15 @@ class SpeechManager(
                 }
 
                 VoiceGender.FEMALE -> {
-                    tts.setPitch(1.10f)
+                    tts.setPitch(1.15f)
                     tts.setSpeechRate(1.0f)
                 }
             }
-
         } catch (e: Exception) {
-            Log.w(TAG, "Could not configure TTS voice profile", e)
+            Log.w(TAG, "Could not configure voice profile", e)
         }
     }
+
     /**
      * Speaks text using the user's spoken language if available, falling back safely.
      */
