@@ -40,19 +40,6 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <service
-            android:name=".service.VirJoyInCallService"
-            android:exported="true"
-            android:permission="android.permission.BIND_INCALL_SERVICE">
-            <intent-filter>
-                <action android:name="android.telecom.InCallService" />
-            </intent-filter>
-
-            <meta-data
-                android:name="android.telecom.IN_CALL_SERVICE_UI"
-                android:value="true" />
-        </service>
-
         <receiver
             android:name=".receiver.BootReceiver"
             android:exported="true">

@@ -8,9 +8,6 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
-import android.speech.tts.UtteranceProgressListener
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import com.example.model.SupportedLanguage
 import com.example.model.VoiceGender
@@ -34,10 +31,6 @@ class SpeechManager(
     private var isTtsInitialized = false
     private var currentVoiceGender: VoiceGender = VoiceGender.FEMALE
     private var lastSpokenLanguage: SupportedLanguage = SupportedLanguage.ENGLISH
-    private var selectedLanguage: SupportedLanguage = SupportedLanguage.ENGLISH
-    private var continuousListeningEnabled: Boolean = false
-    private var callActive: Boolean = false
-    private val mainHandler = Handler(Looper.getMainLooper())
 
     init {
         initTts()
@@ -141,41 +134,10 @@ class SpeechManager(
     /**
      * Speaks text using the user's spoken language if available, falling back safely.
      */
-    fun speak(
-        text: String,
-        language: SupportedLanguage = SupportedLanguage.ENGLISH,
-        onDone: (() -> Unit)? = null
-    ) {
-        if (!isTtsInitialized) {
-            onDone?.invoke()
-            return
-        }
-
-        val tts = textToSpeech ?: run {
-            onDone?.invoke()
-            return
-        }
-
+    fun speak(text: String, language: SupportedLanguage = SupportedLanguage.ENGLISH) {
+        if (!isTtsInitialized) return
+        val tts = textToSpeech ?: return
         lastSpokenLanguage = language
-        selectedLanguage = language
-
-        if (onDone != null) {
-            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {}
-
-                override fun onDone(utteranceId: String?) {
-                    mainHandler.post {
-                        onDone.invoke()
-                    }
-                }
-
-                override fun onError(utteranceId: String?) {
-                    mainHandler.post {
-                        onDone.invoke()
-                    }
-                }
-            })
-        }
 
         try {
             val targetLocale = language.locale
@@ -195,83 +157,6 @@ class SpeechManager(
         }
 
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "VirJoyTTS")
-    }
-
-    /**
-     * Compatibility API used by AssistantViewModel.
-     * Keeps language selection separate from the low-level recognizer.
-     */
-    fun updateLanguage(language: SupportedLanguage) {
-        selectedLanguage = language
-        lastSpokenLanguage = language
-    }
-
-    /**
-     * Enables/disables hands-free continuous listening behaviour.
-     */
-    fun setContinuousListeningEnabled(enabled: Boolean) {
-        continuousListeningEnabled = enabled
-    }
-
-    /**
-     * Starts listening specifically for a user command.
-     */
-    fun startCommandListening(language: SupportedLanguage = selectedLanguage) {
-        updateLanguage(language)
-        startListening()
-    }
-
-    /**
-     * Starts hands-free wake-word listening.
-     */
-    fun startWakeListening(language: SupportedLanguage = selectedLanguage) {
-        updateLanguage(language)
-        startListening()
-    }
-
-    /**
-     * Restarts wake listening after a short delay.
-     */
-    fun scheduleRestartListening(
-        language: SupportedLanguage = selectedLanguage,
-        delayMs: Long = 800L
-    ) {
-        if (!continuousListeningEnabled) return
-
-        mainHandler.removeCallbacksAndMessages(null)
-        mainHandler.postDelayed({
-            if (continuousListeningEnabled) {
-                startWakeListening(language)
-            }
-        }, delayMs)
-    }
-
-    /**
-     * Updates phone-call state.
-     *
-     * While a call is active, speech listening/restarting must not
-     * interfere with the phone call. The foreground service owns
-     * the actual call-state detection.
-     */
-    fun setCallActive(active: Boolean) {
-        callActive = active
-
-        if (active) {
-            mainHandler.removeCallbacksAndMessages(null)
-            stopSpeaking()
-            stopListening()
-        }
-    }
-
-    /**
-     * Immediately stops text-to-speech output.
-     */
-    fun stopSpeaking() {
-        try {
-            textToSpeech?.stop()
-        } catch (e: Exception) {
-            Log.w(TAG, "Error stopping TTS", e)
-        }
     }
 
     fun startListening() {
